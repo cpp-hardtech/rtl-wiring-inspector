@@ -196,6 +196,21 @@ struct DataFlowAnalysis
 
   void handle(ast::CaseStatement const &stmt);
 
+  /// For loops whose iteration variable is declared outside the header
+  /// (e.g. a module-level integer) are not unrolled by the base analysis,
+  /// which drops the body's definitions when the exit condition can't be
+  /// evaluated. Unroll them here when the iteration count is provable, and
+  /// otherwise analyse the body once conservatively.
+  void handle(ast::ForLoopStatement const &stmt);
+
+  /// Repeat loops: unroll a constant count; otherwise analyse the body
+  /// once while keeping the zero-iteration path.
+  void handle(ast::RepeatLoopStatement const &stmt);
+
+  /// While loops: analyse the body at least once when the condition is not
+  /// statically decidable, so the body's definitions are not lost.
+  void handle(ast::WhileLoopStatement const &stmt);
+
   /// Walk a conditional whose condition carries a pattern match, taking
   /// over the branch bookkeeping the base class would otherwise do. The
   /// base splits the flow state into branches before visiting the
@@ -232,6 +247,14 @@ private:
 
   void driveLhsLspSegment(const BitSliceSource &src, const Segment &seg);
   void driveRhsLspSegment(const BitSliceSource &src, const Segment &seg);
+
+  /// Try to unroll @p stmt when its loop variables are declared outside the
+  /// header. Returns true when the whole loop was visited. Sets @p
+  /// hasExternalStaticVar when at least one header initializer targets a
+  /// variable with static lifetime, which selects the conservative
+  /// at-least-once handling on failure.
+  auto tryUnrollExternalForLoop(ast::ForLoopStatement const &stmt,
+                                bool &hasExternalStaticVar) -> bool;
 };
 
 } // namespace slang::netlist

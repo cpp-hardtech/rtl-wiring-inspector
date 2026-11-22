@@ -6,8 +6,13 @@
 
 #include "slang/ast/Expression.h"
 #include "slang/ast/ValuePath.h"
+#include "slang/ast/expressions/AssignmentExpressions.h"
+#include "slang/ast/expressions/MiscExpressions.h"
+#include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/symbols/ValueSymbol.h"
 #include "slang/ast/symbols/VariableSymbols.h"
+
+#include <optional>
 
 namespace slang::netlist {
 
@@ -19,6 +24,63 @@ auto hasPattern(TConditions const &conditions) -> bool {
   return std::any_of(conditions.begin(), conditions.end(),
                      [](auto const &cond) { return cond.pattern != nullptr; });
 }
+
+/// Return the value of a constant iteration count, if it has one.
+auto asIterationCount(ConstantValue const &value) -> std::optional<int64_t> {
+  if (!value.isInteger()) {
+    return std::nullopt;
+  }
+  return value.integer().as<int64_t>();
+}
+
+/// Walk a loop body to see whether it assigns to one of the iteration
+/// variables or leaves the loop before the body ends. Both make linear
+/// unrolling unsound, so the caller falls back to conservative handling.
+struct LoopBodySummaryVisitor
+    : public ast::ASTVisitor<LoopBodySummaryVisitor, ast::VisitFlags::AllGood> {
+  SmallVector<ast::ValueSymbol const *, 4> vars;
+  bool modified{false};
+  bool hasEarlyExit{false};
+
+  LoopBodySummaryVisitor() = default;
+  explicit LoopBodySummaryVisitor(
+      SmallVector<ast::ValueSymbol const *, 4> const &loopVars)
+      : vars(loopVars) {}
+
+  void handle(ast::AssignmentExpression const &expr) {
+    if (!modified) {
+      checkTarget(expr.left());
+    }
+    visitDefault(expr);
+  }
+
+  void handle(ast::UnaryExpression const &expr) {
+    if (!modified && ast::OpInfo::isLValue(expr.op)) {
+      checkTarget(expr.operand());
+    }
+    visitDefault(expr);
+  }
+
+  void handle(ast::BreakStatement const &) { hasEarlyExit = true; }
+  void handle(ast::ContinueStatement const &) { hasEarlyExit = true; }
+  void handle(ast::ReturnStatement const &) { hasEarlyExit = true; }
+  void handle(ast::DisableStatement const &) { hasEarlyExit = true; }
+
+  template <typename T> void handle(T const &node) {
+    if (modified && hasEarlyExit) {
+      return;
+    }
+    visitDefault(node);
+  }
+
+private:
+  void checkTarget(ast::Expression const &lhs) {
+    auto const *symbol = lhs.getSymbolReference();
+    if (symbol != nullptr && std::ranges::find(vars, symbol) != vars.end()) {
+      modified = true;
+    }
+  }
+};
 
 } // namespace
 
@@ -468,6 +530,223 @@ void DataFlowAnalysis::handle(ast::CaseStatement const &stmt) {
   visitStmt(stmt);
 }
 
+void DataFlowAnalysis::handle(ast::ForLoopStatement const &stmt) {
+  DEBUG_PRINT("ForLoopStatement\n");
+
+  // Loops with a variable declared in the header, no initializer, or no
+  // stop expression are handled by the base analysis, which knows how to
+  // evaluate and unroll header variables.
+  if (!stmt.loopVars.empty() || stmt.initializers.empty() ||
+      stmt.stopExpr == nullptr) {
+    visitStmt(stmt);
+    return;
+  }
+
+  bool hasExternalStaticVar = false;
+  if (tryUnrollExternalForLoop(stmt, hasExternalStaticVar)) {
+    return;
+  }
+
+  if (!hasExternalStaticVar) {
+    // Automatic variables declared outside the header are still handled by
+    // the base unroller.
+    visitStmt(stmt);
+    return;
+  }
+
+  // The stop condition can't be evaluated: the loop may not execute at all
+  // or may execute any number of times. Analyse the body once and include
+  // the zero-iteration path, so the body's definitions are not lost.
+  for (auto init : stmt.initializers) {
+    visit(*init);
+  }
+  visit(*stmt.stopExpr);
+  auto preLoop = copyState(getState());
+  visit(stmt.body);
+  for (auto step : stmt.steps) {
+    visit(*step);
+  }
+  if (getState().reachable) {
+    joinState(getState(), preLoop);
+  } else {
+    setState(std::move(preLoop));
+  }
+}
+
+auto DataFlowAnalysis::tryUnrollExternalForLoop(
+    ast::ForLoopStatement const &stmt, bool &hasExternalStaticVar) -> bool {
+  // Only loops whose iteration variables are declared outside the header,
+  // initialized from constants, and left alone by the body. The classic
+  // case is a module-level `integer i`; slang's own unroller only accepts
+  // automatic variables for this shape and otherwise drops the body.
+  SmallVector<ast::ValueSymbol const *, 4> loopVars;
+  auto &evalCtx = getEvalContext();
+
+  for (auto init : stmt.initializers) {
+    auto const *assign = init->as_if<ast::AssignmentExpression>();
+    if (assign == nullptr || assign->isCompound()) {
+      return false;
+    }
+    auto const *name = assign->left().as_if<ast::NamedValueExpression>();
+    if (name == nullptr) {
+      return false;
+    }
+    auto const *var = name->symbol.as_if<ast::VariableSymbol>();
+    if (var == nullptr) {
+      return false;
+    }
+    if (var->lifetime != ast::VariableLifetime::Automatic) {
+      hasExternalStaticVar = true;
+    }
+    loopVars.push_back(var);
+  }
+
+  if (!hasExternalStaticVar) {
+    return false;
+  }
+
+  // Any write to an iteration variable from the body changes the values
+  // computed from the header alone, so don't unroll in that case.
+  LoopBodySummaryVisitor summary(loopVars);
+  stmt.body.visit(summary);
+  if (summary.modified || summary.hasEarlyExit) {
+    return false;
+  }
+
+  auto cleanup = ScopeGuard([&] {
+    for (auto *var : loopVars) {
+      evalCtx.deleteLocal(var);
+    }
+  });
+
+  for (auto init : stmt.initializers) {
+    auto const &assign = *init->as_if<ast::AssignmentExpression>();
+    auto const *name = assign.left().as_if<ast::NamedValueExpression>();
+    auto const &var = name->symbol.as<ast::VariableSymbol>();
+    auto value = assign.right().eval(evalCtx);
+    if (!value.isInteger() ||
+        value.integer().getBitWidth() != var.getType().getBitWidth()) {
+      return false;
+    }
+    evalCtx.createLocal(&var, std::move(value));
+  }
+
+  // Evaluate the whole header up front. If any part is not constant, fall
+  // back without having touched the flow state.
+  SmallVector<ConstantValue> iterValues;
+  uint64_t const maxIterations =
+      std::max<uint64_t>(options.maxLoopAnalysisSteps, 1);
+  while (true) {
+    auto condition = stmt.stopExpr->eval(evalCtx);
+    if (!condition) {
+      return false;
+    }
+    if (!condition.isTrue()) {
+      break;
+    }
+    for (auto *var : loopVars) {
+      iterValues.push_back(*evalCtx.findLocal(var));
+    }
+    if (iterValues.size() / loopVars.size() >= maxIterations) {
+      return false;
+    }
+    for (auto step : stmt.steps) {
+      if (!step->eval(evalCtx)) {
+        return false;
+      }
+    }
+  }
+
+  // Replay the loop: visit the initializers once for their edges, then the
+  // body once per computed iteration.
+  for (auto init : stmt.initializers) {
+    visit(*init);
+  }
+  visit(*stmt.stopExpr);
+  size_t next = 0;
+  for (size_t iteration = 0; iteration < iterValues.size() / loopVars.size();
+       iteration++) {
+    for (auto *var : loopVars) {
+      *evalCtx.findLocal(var) = iterValues[next++];
+    }
+    visit(stmt.body);
+    for (auto step : stmt.steps) {
+      visit(*step);
+    }
+  }
+  return true;
+}
+
+void DataFlowAnalysis::handle(ast::RepeatLoopStatement const &stmt) {
+  DEBUG_PRINT("RepeatLoopStatement\n");
+
+  LoopBodySummaryVisitor summary;
+  stmt.body.visit(summary);
+  if (summary.hasEarlyExit) {
+    visitStmt(stmt);
+    return;
+  }
+
+  visit(stmt.count);
+  auto count = asIterationCount(stmt.count.eval(getEvalContext()));
+  if (count.has_value() && *count >= 0) {
+    if (static_cast<uint64_t>(*count) > options.maxLoopAnalysisSteps) {
+      visit(stmt.body);
+      return;
+    }
+    // A constant repeat count expands to one body visit per iteration.
+    for (int64_t i = 0; i < *count; i++) {
+      visit(stmt.body);
+    }
+    return;
+  }
+
+  // The count is unknown, so the body might not execute at all: analyse
+  // one iteration and keep the pre-loop definitions too.
+  auto preLoop = copyState(getState());
+  visit(stmt.body);
+  if (getState().reachable) {
+    joinState(getState(), preLoop);
+  } else {
+    setState(std::move(preLoop));
+  }
+}
+
+void DataFlowAnalysis::handle(ast::WhileLoopStatement const &stmt) {
+  DEBUG_PRINT("WhileLoopStatement\n");
+
+  LoopBodySummaryVisitor summary;
+  stmt.body.visit(summary);
+  if (summary.hasEarlyExit) {
+    visitStmt(stmt);
+    return;
+  }
+
+  visit(stmt.cond);
+  auto condition = tryEvalBool(stmt.cond);
+  if (condition) {
+    if (!condition.isTrue()) {
+      // Statically false, so the body never runs.
+      return;
+    }
+    // Statically true: the loop never exits normally; analyse one
+    // iteration like the base analysis.
+    visit(stmt.body);
+    return;
+  }
+
+  // The condition is not decidable, so the body may execute at least once
+  // but the zero-iteration path is also possible. Include both, otherwise
+  // every definition inside the body is lost.
+  auto preLoop = copyState(getState());
+  visit(stmt.body);
+  if (getState().reachable) {
+    joinState(getState(), preLoop);
+  } else {
+    setState(std::move(preLoop));
+  }
+}
+
 auto DataFlowAnalysis::mergeStates(AnalysisState &result,
                                    AnalysisState const &other) {
 
@@ -583,6 +862,25 @@ void DataFlowAnalysis::driveLhsLspSegment(const BitSliceSource &src,
   SLANG_ASSERT(seg.concatLo >= src.srcLo);
   auto const &path = *src.path;
   auto const &symbol = *path.rootSymbol();
+
+  // A non-constant select has no fully static path: ValuePath falls back
+  // to the root symbol and its whole range. Drive that whole range rather
+  // than mapping the access's width onto the low bits.
+  if (!path.isFullyStatic()) {
+    auto const *lsp = path.lsp != nullptr ? path.lsp : path.rootExpr;
+    if (lsp == nullptr) {
+      return;
+    }
+    handleLvalue(
+        symbol, *lsp,
+        path.lsp != nullptr
+            ? DriverBitRange(path.lspBounds)
+            : DriverBitRange{
+              0,
+              static_cast<int32_t>(symbol.getType().getSelectableWidth()) - 1});
+    return;
+  }
+
   auto const *lsp = path.lsp;
   // Offset of this segment's LSB within the LSP's concat range.
   auto offset = seg.concatLo - src.srcLo;
@@ -600,6 +898,25 @@ void DataFlowAnalysis::driveRhsLspSegment(const BitSliceSource &src,
   SLANG_ASSERT(seg.concatLo >= src.srcLo);
   auto const &path = *src.path;
   auto const &symbol = *path.rootSymbol();
+
+  // A non-constant select reads an unknown subset of the root symbol; fan
+  // the whole symbol in rather than mapping the access's width onto the
+  // low bits.
+  if (!path.isFullyStatic()) {
+    auto const *lsp = path.lsp != nullptr ? path.lsp : path.rootExpr;
+    if (lsp == nullptr) {
+      return;
+    }
+    handleRvalue(
+        symbol, *lsp,
+        path.lsp != nullptr
+            ? DriverBitRange(path.lspBounds)
+            : DriverBitRange{
+              0,
+              static_cast<int32_t>(symbol.getType().getSelectableWidth()) - 1});
+    return;
+  }
+
   auto const *lsp = path.lsp;
   // Offset of this segment's LSB within the LSP's concat range.
   auto offset = seg.concatLo - src.srcLo;

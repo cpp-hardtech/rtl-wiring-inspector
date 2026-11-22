@@ -74,8 +74,9 @@ endmodule
 }
 
 TEST_CASE("While loop with assignments", "[Loop]") {
-  // Known limitation: while loops are not unrolled by the data flow analysis,
-  // so assignments inside the loop body are not tracked as dependencies.
+  // The loop variable is automatic and not tracked, so the body is
+  // analysed once conservatively and the unknown index falls back to the
+  // whole symbol.
   auto const &tree = R"(
 module m(input logic [7:0] a, output logic [7:0] b);
   logic [7:0] t;
@@ -91,6 +92,102 @@ module m(input logic [7:0] a, output logic [7:0] b);
   assign b = t;
 endmodule
 )";
-  const NetlistTest test(tree);
-  CHECK(!test.pathExists("m.a", "m.b"));
+  NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.b"));
+}
+
+TEST_CASE("For loop with a module-level integer variable", "[Loop]") {
+  auto const &tree = R"(
+module m(input logic [3:0] a, output logic [3:0] y);
+  integer i;
+  always_comb begin
+    for (i = 0; i < 4; i = i + 1)
+      y[i] = a[i];
+  end
+endmodule
+)";
+  NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.y"));
+  for (int bit = 0; bit < 4; bit++) {
+    CHECK(!test.getDrivers("m.y", {bit, bit}).empty());
+  }
+}
+
+TEST_CASE("For loop with a module-level integer assigns a whole vector",
+          "[Loop]") {
+  auto const &tree = R"(
+module m(input logic [3:0] a, output logic [3:0] y);
+  integer i;
+  always_comb begin
+    for (i = 0; i < 4; i = i + 1)
+      y = a;
+  end
+endmodule
+)";
+  NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.y"));
+  CHECK(!test.getDrivers("m.y", {0, 3}).empty());
+}
+
+TEST_CASE("Nested for loops with module-level integers", "[Loop]") {
+  auto const &tree = R"(
+module m(input logic [3:0] a, output logic [3:0] b);
+  integer i;
+  integer j;
+  logic [3:0] t;
+  always_comb begin
+    for (i = 0; i < 2; i = i + 1)
+      for (j = 0; j < 2; j = j + 1)
+        t[i*2+j] = a[i*2+j];
+  end
+  assign b = t;
+endmodule
+)";
+  NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.b"));
+  for (int bit = 0; bit < 4; bit++) {
+    CHECK(!test.getDrivers("m.b", {bit, bit}).empty());
+  }
+}
+
+TEST_CASE("Repeat loop with a constant count", "[Loop]") {
+  auto const &tree = R"(
+module m(input logic [3:0] a, output logic [3:0] y);
+  always_comb begin
+    int i;
+    i = 0;
+    repeat (4) begin
+      y[i] = a[i];
+      i = i + 1;
+    end
+  end
+endmodule
+)";
+  NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.y"));
+  // The unknown index falls back to the whole symbol, so every bit has a
+  // driver rather than only bit 0.
+  for (int bit = 0; bit < 4; bit++) {
+    CHECK(!test.getDrivers("m.y", {bit, bit}).empty());
+  }
+}
+
+TEST_CASE("Repeat loop with non-blocking assignments", "[Loop]") {
+  auto const &tree = R"(
+module m(input logic clk, input logic [3:0] d, output logic [3:0] q);
+  always_ff @(posedge clk) begin
+    int i;
+    i = 0;
+    repeat (4) begin
+      q[i] <= d[i];
+      i = i + 1;
+    end
+  end
+endmodule
+)";
+  NetlistTest test(tree);
+  CHECK(test.pathExists("m.d", "m.q"));
+  for (int bit = 0; bit < 4; bit++) {
+    CHECK(!test.getDrivers("m.q", {bit, bit}).empty());
+  }
 }

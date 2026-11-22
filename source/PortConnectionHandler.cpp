@@ -390,25 +390,42 @@ void PortConnectionHandler::drivePortSegment(Segment const &seg, bool isOutput,
       if (root == nullptr) {
         break;
       }
-      // Map the segment's concat-space range back onto the LSP's own
-      // bounds so the driven range is narrow to what this segment
-      // actually covers, not the full LSP.
-      auto offset = seg.concatLo - src.srcLo;
-      auto segWidth = seg.width();
-      // alignSegments must never emit zero-width segments; `segWidth - 1`
-      // would underflow int32_t.
-      SLANG_ASSERT(segWidth > 0);
-      auto lo = static_cast<int32_t>(path.lspBounds.first + offset);
-      auto hi =
-          static_cast<int32_t>(path.lspBounds.first + offset + segWidth - 1);
-      DriverBitRange mapped{lo, hi};
+      // A non-constant select has no fully static path, so the actual
+      // covers an unknown range of the root; fall back to the whole symbol
+      // rather than mapping the access's width onto the low bits.
+      DriverBitRange mapped;
+      if (!path.isFullyStatic()) {
+        if (path.lsp != nullptr) {
+          mapped = DriverBitRange(path.lspBounds);
+        } else {
+          auto width = root->getType().getSelectableWidth();
+          if (width == 0) {
+            break;
+          }
+          mapped = DriverBitRange{0, static_cast<int32_t>(width) - 1};
+        }
+      } else {
+        // Map the segment's concat-space range back onto the LSP's own
+        // bounds so the driven range is narrow to what this segment
+        // actually covers, not the full LSP.
+        auto offset = seg.concatLo - src.srcLo;
+        auto segWidth = seg.width();
+        // alignSegments must never emit zero-width segments; `segWidth - 1`
+        // would underflow int32_t.
+        SLANG_ASSERT(segWidth > 0);
+        auto lo = static_cast<int32_t>(path.lspBounds.first + offset);
+        auto hi =
+            static_cast<int32_t>(path.lspBounds.first + offset + segWidth - 1);
+        mapped = DriverBitRange{lo, hi};
+      }
+      auto const &lsp = path.lsp != nullptr ? *path.lsp : *path.rootExpr;
       for (auto *portNode : portNodes) {
         if (isOutput) {
-          builder.mergeDrivers(*root, mapped, {DriverInfo(portNode, path.lsp)});
+          builder.mergeDrivers(*root, mapped, {DriverInfo(portNode, &lsp)});
           builder.hookupOutputPort(*root, mapped,
                                    {DriverInfo(portNode, nullptr)});
         } else {
-          builder.addRvalue(evalCtx, *root, *path.lsp, mapped, portNode);
+          builder.addRvalue(evalCtx, *root, lsp, mapped, portNode);
         }
       }
       break;
