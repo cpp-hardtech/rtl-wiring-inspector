@@ -131,7 +131,18 @@ endmodule
 )";
   NetlistTest test(tree);
   // Reading the inout port inside the module resolves to a boundary node
-  // rather than to nothing.
-  CHECK(!test.getDrivers("top.u.x", {3, 3}).empty());
+  // rather than to nothing: the port node carries a dependency edge for
+  // the read of x[3].
+  bool hasReadDependency = false;
+  for (auto const *node : test.graph.findNodes("top.u.x")) {
+    for (auto const &edge : node->getOutEdges()) {
+      if (edge->symbol != nullptr &&
+          edge->symbol->hierarchicalPath == "top.u.x" &&
+          edge->bounds.overlaps(DriverBitRange{3, 3})) {
+        hasReadDependency = true;
+      }
+    }
+  }
+  CHECK(hasReadDependency);
   CHECK(test.pathExists("top.u.x", "top.o"));
 }
