@@ -388,6 +388,9 @@ if not path.empty():
         print(node.kind, getattr(node, "path", ""))
 @endcode
 
+@c path.front(), @c path.back() and indexing with @c path[i] raise
+@c IndexError when the path is empty or the index is out of range.
+
 @subsection python-iterating Iterating over nodes
 
 @code{.py}

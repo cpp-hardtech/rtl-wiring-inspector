@@ -17,6 +17,7 @@
 #include "netlist/PathFinder.hpp"
 #include "netlist/VisitAll.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -350,12 +351,39 @@ NB_MODULE(rtl_wiring_inspector, m) {
       .def(nb::init<netlist::NetlistPath::NodeListType>())
       .def("size", &netlist::NetlistPath::size)
       .def("empty", &netlist::NetlistPath::empty)
-      .def("front", &netlist::NetlistPath::front, nb::rv_policy::reference)
-      .def("back", &netlist::NetlistPath::back, nb::rv_policy::reference)
+      .def(
+          "front",
+          [](netlist::NetlistPath const &self) {
+            if (self.empty()) {
+              throw nb::index_error("front() called on an empty NetlistPath");
+            }
+            return self.front();
+          },
+          nb::rv_policy::reference,
+          "Return the first node of the path. Raises IndexError when the "
+          "path is empty.")
+      .def(
+          "back",
+          [](netlist::NetlistPath const &self) {
+            if (self.empty()) {
+              throw nb::index_error("back() called on an empty NetlistPath");
+            }
+            return self.back();
+          },
+          nb::rv_policy::reference,
+          "Return the last node of the path. Raises IndexError when the "
+          "path is empty.")
       .def(
           "__getitem__",
-          [](const netlist::NetlistPath &self, size_t i) { return self[i]; },
-          nb::rv_policy::reference)
+          [](netlist::NetlistPath const &self, int64_t index) {
+            if (index < 0 || static_cast<size_t>(index) >= self.size()) {
+              throw nb::index_error("NetlistPath index out of range");
+            }
+            return self[static_cast<size_t>(index)];
+          },
+          nb::arg("index"), nb::rv_policy::reference,
+          "Return the node at `index`. Raises IndexError when the index is "
+          "out of range.")
       .def("__len__", &netlist::NetlistPath::size)
       .def(
           "__iter__",
