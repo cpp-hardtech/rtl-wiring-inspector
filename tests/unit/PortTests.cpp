@@ -118,3 +118,20 @@ endmodule
   const NetlistTest test(tree);
   CHECK(test.graph.numNodes() > 0);
 }
+
+TEST_CASE("Inout port registers an input-side placeholder driver", "[Ports]") {
+  auto const &tree = R"(
+module sub(inout wire [3:0] x, output logic o);
+  assign o = x[3];
+endmodule
+
+module top(inout wire [3:0] a, output logic o);
+  sub u(.x(a), .o(o));
+endmodule
+)";
+  NetlistTest test(tree);
+  // Reading the inout port inside the module resolves to a boundary node
+  // rather than to nothing.
+  CHECK(!test.getDrivers("top.u.x", {3, 3}).empty());
+  CHECK(test.pathExists("top.u.x", "top.o"));
+}

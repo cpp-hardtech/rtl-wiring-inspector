@@ -155,7 +155,11 @@ void PortConnectionHandler::materializePortNodes(
     }
     for (auto seg : segments) {
       auto &node = builder.nodeFactory.createPort(symbol, seg);
-      if (driver->isInputPort()) {
+      // Input-side values need a placeholder driver so reads inside the
+      // module resolve to the boundary. An inout port carries both
+      // directions, so it registers one too.
+      if (driver->isInputPort() ||
+          symbol.direction == ast::ArgumentDirection::InOut) {
         builder.addPlaceholderDriver(valueSymbol, seg, &node);
       }
     }

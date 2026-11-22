@@ -274,3 +274,58 @@ endmodule
   }
   CHECK(foundReadEdge);
 }
+
+TEST_CASE("Interface net members are modelled through modports",
+          "[Interface]") {
+  auto const &tree = R"(
+interface I;
+  wire [3:0] d;
+  modport mst (output d);
+  modport slv (input d);
+endinterface
+
+module drv(I.mst m, input logic [3:0] i);
+  assign m.d = i;
+endmodule
+
+module snk(I.slv m, output logic [3:0] o);
+  assign o = m.d;
+endmodule
+
+module top(input logic [3:0] a, output logic [3:0] b);
+  I intf();
+  drv u_d(.m(intf), .i(a));
+  snk u_s(.m(intf), .o(b));
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("top.a", "top.b"));
+  auto *member = test.graph.lookup("top.intf.d");
+  REQUIRE(member != nullptr);
+  CHECK(member->kind == NodeKind::Variable);
+}
+
+TEST_CASE("Interface net member with an inout modport", "[Interface]") {
+  auto const &tree = R"(
+interface I;
+  wire [3:0] d;
+  modport bidir (inout d);
+endinterface
+
+module drv(I.bidir m, input logic [3:0] i);
+  assign m.d = i;
+endmodule
+
+module snk(I.bidir m, output logic [3:0] o);
+  assign o = m.d;
+endmodule
+
+module top(input logic [3:0] a, output logic [3:0] b);
+  I intf();
+  drv u_d(.m(intf), .i(a));
+  snk u_s(.m(intf), .o(b));
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("top.a", "top.b"));
+}

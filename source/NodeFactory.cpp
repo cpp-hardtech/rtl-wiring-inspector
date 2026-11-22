@@ -71,7 +71,7 @@ auto NodeFactory::createPort(ast::PortSymbol const &symbol,
   return node;
 }
 
-auto NodeFactory::createVariable(ast::VariableSymbol const &symbol,
+auto NodeFactory::createVariable(ast::ValueSymbol const &symbol,
                                  DriverBitRange bounds) -> NetlistNode & {
   auto const *ref = builder.toSymbolRef(symbol);
   auto &node = builder.graph.addNode(std::make_unique<Variable>(
