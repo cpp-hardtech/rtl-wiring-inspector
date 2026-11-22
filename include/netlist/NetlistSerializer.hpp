@@ -38,9 +38,14 @@ struct NetlistSerializer {
   static auto serialize(NetlistGraph const &graph) -> std::string;
 
   /// Deserialise a JSON string into @p graph.
-  /// The graph must be empty. FileTable is populated from the JSON.
+  /// The graph must be empty. FileTable and black-box paths are populated from
+  /// the JSON.
   ///
-  /// @throws std::runtime_error on parse failure or unsupported version.
+  /// Every node and edge is validated before the graph is modified, so a
+  /// malformed document leaves @p graph untouched.
+  ///
+  /// @throws std::runtime_error with an "invalid netlist:" diagnostic on parse
+  /// failure, unsupported format version, or inconsistent contents.
   static void deserialize(std::string_view json, NetlistGraph &graph);
 };
 
