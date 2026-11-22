@@ -1,0 +1,237 @@
+#include "Test.hpp"
+
+#include <memory>
+
+TEST_CASE("DOT output for simple continuous assignment", "[Dot]") {
+  auto const &tree = R"(
+module m(input logic a, output logic b);
+  assign b = a;
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto dot = test.renderDot();
+  CHECK(dot.find("digraph") != std::string::npos);
+  CHECK(dot.find("In port a") != std::string::npos);
+  CHECK(dot.find("Out port b") != std::string::npos);
+  CHECK(dot.find("Assignment") != std::string::npos);
+  CHECK(dot.find("a[") != std::string::npos);
+  CHECK(dot.find("b[") != std::string::npos);
+}
+
+TEST_CASE("DOT output for conditional (if/else)", "[Dot]") {
+  auto const &tree = R"(
+module m(input logic a, input logic c, output logic b);
+  always_comb begin
+    if (c)
+      b = a;
+    else
+      b = 1'b0;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto dot = test.renderDot();
+  CHECK(dot.find("Conditional") != std::string::npos);
+  CHECK(dot.find("Merge") != std::string::npos);
+  CHECK(dot.find("In port a") != std::string::npos);
+  CHECK(dot.find("In port c") != std::string::npos);
+  CHECK(dot.find("Out port b") != std::string::npos);
+}
+
+TEST_CASE("DOT output for case statement", "[Dot]") {
+  auto const &tree = R"(
+module m(input logic [1:0] sel, input logic a, output logic b);
+  always_comb begin
+    case (sel)
+      0: b = a;
+      1: b = 1'b0;
+      default: b = 1'b1;
+    endcase
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto dot = test.renderDot();
+  CHECK(dot.find("Case") != std::string::npos);
+  CHECK(dot.find("In port sel") != std::string::npos);
+  CHECK(dot.find("In port a") != std::string::npos);
+  CHECK(dot.find("Out port b") != std::string::npos);
+}
+
+TEST_CASE("DOT output for sequential state", "[Dot]") {
+  auto const &tree = R"(
+module m(input logic clk, input logic d, output logic q);
+  always_ff @(posedge clk)
+    q <= d;
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto dot = test.renderDot();
+  CHECK(dot.find("In port clk") != std::string::npos);
+  CHECK(dot.find("In port d") != std::string::npos);
+  CHECK(dot.find("Out port q") != std::string::npos);
+  // State nodes are rendered as "name [bounds]".
+  // Single-bit ranges are formatted as "[0]", not "[0:0]".
+  CHECK(dot.find("[0]") != std::string::npos);
+}
+
+TEST_CASE("DOT output with disabled edges", "[Dot]") {
+  auto const &tree = R"(
+module m(input logic [7:0] a, output logic [7:0] b);
+  assign b = a;
+endmodule
+)";
+  const NetlistTest test(tree);
+
+  auto dotBefore = test.renderDot();
+  CHECK(dotBefore.find("->") != std::string::npos);
+
+  // Find a labeled edge and disable it.
+  bool foundEdge = false;
+  std::string disabledEdgeLabel;
+  for (auto &node : test.graph) {
+    for (auto &edge : node->getOutEdges()) {
+      if (edge->symbol != nullptr && !edge->symbol->empty()) {
+        disabledEdgeLabel = edge->symbol->name + toString(edge->bounds);
+        edge->disable();
+        foundEdge = true;
+        break;
+      }
+    }
+    if (foundEdge)
+      break;
+  }
+  CHECK(foundEdge);
+
+  auto dotAfter = test.renderDot();
+  CHECK(dotAfter.find("digraph") != std::string::npos);
+  CHECK(dotAfter.find(disabledEdgeLabel) == std::string::npos);
+}
+
+TEST_CASE("DOT output with unlabeled edges", "[Dot]") {
+  auto const &tree = R"(
+module m(input logic a, input logic c, output logic b);
+  always_comb begin
+    if (c)
+      b = a;
+    else
+      b = 1'b0;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto dot = test.renderDot();
+
+  // Conditional/Merge branch edges have no symbol label.
+  bool hasUnlabeledEdge = false;
+  std::istringstream stream(dot);
+  std::string line;
+  while (std::getline(stream, line)) {
+    if (line.find("->") != std::string::npos &&
+        line.find("label") == std::string::npos) {
+      hasUnlabeledEdge = true;
+      break;
+    }
+  }
+  CHECK(hasUnlabeledEdge);
+}
+
+TEST_CASE("DOT output for Variable node (interface)", "[Dot]") {
+  auto const &tree = R"(
+interface I;
+  logic l;
+  modport mst(output l);
+  modport slv(input l);
+endinterface
+
+module m(I.slv i);
+  logic x;
+  assign x = i.l;
+endmodule
+
+module n(I.mst i);
+  assign i.l = 1;
+endmodule
+
+module top;
+  I i();
+  m u_m(i);
+  n u_n(i);
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto dot = test.renderDot();
+  CHECK(dot.find("Variable l") != std::string::npos);
+}
+
+TEST_CASE("DOT output for module with no logic", "[Dot]") {
+  auto const &tree = R"(
+module m(input logic a, output logic b);
+  assign b = a;
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto dot = test.renderDot();
+  CHECK(dot.find("digraph {") != std::string::npos);
+  CHECK(dot.find("}") != std::string::npos);
+  CHECK(dot.find("In port a") != std::string::npos);
+  CHECK(dot.find("Out port b") != std::string::npos);
+  // Simple passthrough should have Assignment but no control flow.
+  CHECK(dot.find("Conditional") == std::string::npos);
+  CHECK(dot.find("Case") == std::string::npos);
+}
+
+TEST_CASE("Scoped DOT renders only the selected subgraph", "[Dot]") {
+  auto const &tree = R"(
+module m(input logic a, input logic b, output logic x, output logic y);
+  assign x = a;
+  assign y = b;
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto *start = test.graph.lookup("m.a");
+  REQUIRE(start != nullptr);
+
+  std::unordered_set<NetlistNode const *> scope;
+  scope.insert(start);
+  for (auto *node : test.graph.getCombFanOut(*start)) {
+    scope.insert(node);
+  }
+
+  netlist::FormatBuffer buffer;
+  NetlistDot::render(test.graph, buffer, scope);
+  auto dot = std::string(buffer.str());
+
+  CHECK(dot.find("port a") != std::string::npos);
+  CHECK(dot.find("port x") != std::string::npos);
+  // The independent b -> y cone must be excluded.
+  CHECK(dot.find("port b") == std::string::npos);
+  CHECK(dot.find("port y") == std::string::npos);
+}
+
+TEST_CASE("DOT output labels an Operation node with its kind and width",
+          "[Dot]") {
+  NetlistGraph graph;
+  graph.addNode(std::make_unique<Operation>(OperationKind::BitwiseAnd, 8,
+                                            /*isSigned=*/false,
+                                            TextLocation{}));
+  netlist::FormatBuffer buffer;
+  NetlistDot::render(graph, buffer);
+  CHECK(buffer.str().find("Op BitwiseAnd [8]") != std::string::npos);
+}
+
+TEST_CASE("DOT output escapes record metacharacters in names", "[Dot]") {
+  // An escaped identifier may contain characters that would otherwise
+  // split a record label into fields.
+  auto const &tree = R"(
+module m(input logic a, output logic \y|z );
+  assign \y|z  = a;
+endmodule
+)";
+  const NetlistTest test(tree);
+  netlist::FormatBuffer buffer;
+  NetlistDot::render(test.graph, buffer);
+  auto dot = buffer.str();
+  CHECK(dot.find("port y\\|z") != std::string::npos);
+  CHECK(dot.find("\"y|z") == std::string::npos);
+}

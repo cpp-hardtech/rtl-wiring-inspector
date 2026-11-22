@@ -1,0 +1,40 @@
+/** @mainpage
+
+RTL Wiring Inspector is built on top of [slang](https://sv-lang.com) for analysing the
+source-level static connectivity of a SystemVerilog design. It uses slang's AST
+and data-flow analyses to construct a dependency graph of operations and provides
+facilities for interacting with this data structure.
+
+RTL Wiring Inspector is a C++ library and provides a command-line tool for interactive
+use, and a Python module for straightforward integration into scripts. Possible
+applications include connectivity checks, CDC checks and timing path estimation.
+
+@section features Features
+
+- Data dependencies that are resolved to a bit level.
+- Procedural dependencies in always blocks, including evaluation of
+  constant-valued conditions, unrolling of static loops, and tracking of
+  non-blocking assignments.
+- Path finding and combinational loop detection.
+- Driver, port, and register reporting.
+- Netlist export (DOT) and serialization (JSON) for later reloading.
+- Multithreaded netlist construction for large designs.
+- Integration with the facilities of slang's libraries.
+- A command-line tool (@c rtl-wiring-inspector) for interactive use, plus a
+  companion tool (@c rtl-report) that surfaces the underlying AST
+  information.
+- Python bindings to integrate the tool into scripts.
+
+@section support-contributions Support and contributions
+
+- Bug reports: [open an issue](https://github.com/cpp-hardtech/rtl-wiring-inspector/issues) on GitHub.
+- Contributing: pull requests are welcome, see our [contributing
+  guidelines](https://github.com/cpp-hardtech/rtl-wiring-inspector/blob/main/CONTRIBUTING.md).
+
+@section license License
+
+RTL Wiring Inspector is licensed under the MIT License. See the [full
+license](https://github.com/cpp-hardtech/rtl-wiring-inspector/blob/main/LICENSE) for
+details.
+
+**/

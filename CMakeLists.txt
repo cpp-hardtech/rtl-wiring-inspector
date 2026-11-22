@@ -1,0 +1,109 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(
+  rtl-wiring-inspector
+  VERSION 0.12.0
+  LANGUAGES CXX)
+
+include(FetchContent)
+
+option(BUILD_DOCS "Include documentation in the build" ON)
+option(ENABLE_EXTERNAL_TESTS "Include tests using code from external sources"
+       OFF)
+option(ENABLE_PY_BINDINGS "Enable Python bindings" OFF)
+option(CODE_COVERAGE "Enable code coverage" OFF)
+
+# Required for slang to link with rtl_wiring_inspector.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+include(cmake/CPM.cmake)
+
+if(USE_SANITIZER OR USE_STATIC_ANALYZER)
+  cpmaddpackage(
+    "gh:StableCoder/cmake-scripts#c012a75c255e57523c9e2faacd86356439318542")
+endif()
+
+include(cmake/sanitizers.cmake)
+
+cpmaddpackage("gh:fmtlib/fmt#12.1.0")
+cpmaddpackage("gh:catchorg/Catch2@3.14.0")
+cpmaddpackage("gh:nlohmann/json@3.12.0")
+
+if(ENABLE_PY_BINDINGS)
+  find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+else()
+  find_package(Python REQUIRED COMPONENTS Interpreter)
+endif()
+
+# mimalloc replaces the global allocator, which the sanitizer runtimes also
+# intercept.
+if(USE_SANITIZER)
+  set(SLANG_USE_MIMALLOC OFF)
+endif()
+
+# Build slang with pyslang enabled.
+cpmaddpackage(
+  NAME
+  slang
+  GITHUB_REPOSITORY
+  MikePopoloski/slang
+  GIT_TAG
+  0d63890389a03d4312bbce336a85778ea0163bfd
+  OPTIONS
+  "SLANG_INCLUDE_PYLIB ${ENABLE_PY_BINDINGS}"
+  EXCLUDE_FROM_ALL
+  OFF)
+
+# Search path used by tests and examples to import the compiled extensions.
+# nanobind's split mode keeps its runtime in the separate nanobind_backend
+# package, which slang fetches into its build tree unless the Python environment
+# already provides it.
+set(PY_BINDINGS_PATH
+    "${CMAKE_BINARY_DIR}/bindings/python:$<TARGET_FILE_DIR:pyslang>:${slang_BINARY_DIR}/bindings/nanobind_backend"
+)
+
+if(BUILD_DOCS)
+  cpmaddpackage("gh:jothepro/doxygen-awesome-css@2.4.2")
+  add_subdirectory(docs)
+endif()
+
+include(cmake/tools.cmake)
+
+if(CODE_COVERAGE)
+
+  if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "(Apple)?[Cc]lang")
+    message(FATAL_ERROR "Coverage requires clang++ compiler")
+  endif()
+
+  # Find LLVM tools and LCOV
+  find_program(LLVM_PROFDATA_PATH llvm-profdata)
+  find_program(LLVM_COV_PATH llvm-cov)
+
+  if(NOT LLVM_PROFDATA_PATH OR NOT LLVM_COV_PATH)
+    message(FATAL_ERROR "Could not find llvm-profdata or llvm-cov")
+  endif()
+
+endif()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_subdirectory(source)
+add_subdirectory(bindings)
+add_subdirectory(tools)
+enable_testing()
+add_subdirectory(tests)
+
+if(ENABLE_PY_BINDINGS)
+  add_subdirectory(examples)
+endif()
+
+# Packaging
+
+set(CPACK_PACKAGE_NAME "rtl-wiring-inspector")
+set(CPACK_PACKAGE_VERSION "${CMAKE_PROJECT_VERSION}")
+set(CPACK_GENERATOR "ZIP;TGZ")
+set(CPACK_VERBATIM_VARIABLES YES)
+set(CPACK_PACKAGE_FILENAME "${CPACK_PACKAGE_NAME}-${CMAKE_PROJECT_VERSION}")
+include(CPack)

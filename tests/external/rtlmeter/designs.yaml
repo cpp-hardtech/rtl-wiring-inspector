@@ -1,0 +1,183 @@
+# RTLMeter design configuration for rtl-wiring-inspector tests.
+#
+# Each top-level key is a design name corresponding to the rtlmeter design
+# directory. Configurations are split into two buckets:
+#
+#   small_configs: designs/configs that fit comfortably inside the resource
+#                  limits of a standard GitHub Actions runner.
+#   large_configs: designs/configs that are too heavy for GitHub Actions and
+#                  are intended to be run on a beefier host.
+#
+# Each bucket is a list of rtlmeter configuration names. An entry of `~`
+# (YAML null) means "no configuration specifier", producing a single test
+# named after the design (used for rtlmeter designs that only have a default
+# configuration).
+#
+# The `--size` flag to rtlmeter_tests.py selects which buckets run:
+#   --size small : only small_configs
+#   --size all   : small_configs + large_configs (default)
+#
+# Schema:
+#   <DesignName>:
+#     enabled: true|false      # default: true
+#     small_configs:            # optional list of configurations
+#       - <ConfigName or ~>
+#     large_configs:            # optional list of configurations
+#       - <ConfigName or ~>
+#     args:                     # optional extra rtl-wiring-inspector flags
+#       - <flag or file path>
+#
+# Entries in 'args' that do not start with '-' are resolved as file paths
+# relative to the design's directory inside rtlmeter.
+
+Example:
+  enabled: true
+  small_configs:
+    - kind
+    - loud
+  args:
+    - -DVERILATOR
+
+BlackParrot:
+  enabled: false
+  small_configs:
+    - 1x1
+  large_configs:
+    - 2x2
+    - 4x4
+  args:
+    - -DVERILATOR
+    - --allow-dup-initial-drivers
+
+Caliptra:
+  enabled: false
+
+HummingbirdV2-E203:
+  enabled: true
+  small_configs:
+    - default
+
+NVDLA:
+  enabled: true
+  small_configs:
+    - ~
+  args:
+    - -Wno-duplicate-definition
+
+OpenPiton:
+  enabled: true
+  small_configs:
+    - 1x1
+  large_configs:
+    - 2x2
+    - 4x4
+    - 8x8
+  args:
+    - --single-unit
+    - -DVERILATOR
+    - -Wno-unconnected-port
+    - -Wno-range-oob
+    - -Wno-range-width-oob
+    - -Wno-unsized-concat
+    - -Wno-redef-macro
+    - -Wno-explicit-static
+    - -Wno-string-int-concat
+    - -Wno-range-select-reversed
+
+OpenTitan:
+  enabled: true
+  small_configs:
+    - ~
+  args:
+    - -DVERILATOR
+    - --single-unit
+    - src/prim_assert.sv
+    - --relax-enum-conversions
+    - -Wno-unconnected-port
+
+Servant:
+  enabled: true
+  small_configs:
+    - serv
+  args:
+    - --allow-use-before-declare
+    - --relax-string-conversions
+
+Vortex:
+  enabled: true
+  small_configs:
+    - mini
+  large_configs:
+    - huge
+    - sane
+  args:
+    - -DVERILATOR
+    - --allow-hierarchical-const
+    - -Wno-misplaced-trailing-separator
+    - -Wno-mixed-var-assigns
+
+VeeR-EH1:
+  enabled: true
+  small_configs:
+    - default
+    - hiperf
+    - asic
+  args:
+    - --single-unit
+
+VeeR-EH2:
+  enabled: true
+  small_configs:
+    - default
+    - hiperf
+    - asic
+  args:
+    - --single-unit
+
+VeeR-EL2:
+  enabled: true
+  small_configs:
+    - default
+    - hiperf
+    - asic
+  args:
+    - --single-unit
+
+XiangShan:
+  enabled: true
+  small_configs:
+    - mini-chisel3
+    - mini-chisel6
+  large_configs:
+    - default-chisel3
+    - default-chisel6
+  args:
+    - --single-unit
+
+XuanTie-C906:
+  enabled: true
+  small_configs:
+    - ~
+  args:
+    - --single-unit
+
+XuanTie-C910:
+  enabled: true
+  large_configs:
+    - ~
+  args:
+    - --single-unit
+
+XuanTie-E902:
+  enabled: true
+  small_configs:
+    - ~
+  args:
+    - --single-unit
+
+XuanTie-E906:
+  enabled: true
+  small_configs:
+    - ~
+  args:
+    - --single-unit

@@ -1,0 +1,383 @@
+#include "netlist/NetlistGraph.hpp"
+
+#include "DepthFirstSearch.hpp"
+#include "NetlistBuilder.hpp"
+#include "common/Wildcard.hpp"
+
+#include <algorithm>
+#include <limits>
+#include <memory>
+#include <regex>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <unordered_set>
+
+using namespace slang::netlist;
+
+void NetlistGraph::build(ast::Compilation &compilation,
+                         analysis::AnalysisManager &analysisManager,
+                         BuilderOptions options) {
+  NetlistBuilder builder(compilation, analysisManager, *this, options);
+  builder.build(compilation.getRoot());
+  builder.finalize();
+  setBuildProfile(builder.getBuildProfile());
+}
+
+namespace {
+
+/// Attributes an edge must share with another to be mergeable with it.
+auto edgeGroupKey(NetlistEdge const *edge) {
+  return std::tuple(&edge->getTargetNode(), edge->symbol, edge->edgeKind);
+}
+
+/// Orders edges so that mergeable ones form a contiguous ascending run.
+auto edgeMergeKey(NetlistEdge const *edge) {
+  return std::tuple_cat(edgeGroupKey(edge), edge->bounds.toPair());
+}
+
+} // namespace
+
+void NetlistGraph::mergeParallelEdges() {
+  std::vector<NetlistEdge *> candidates;
+  std::vector<NetlistEdge const *> absorbed;
+
+  for (auto const &node : nodes) {
+    if (!node->mayHaveParallelOutEdges()) {
+      continue;
+    }
+
+    // Unannotated edges carry no range, so they are never merged.
+    candidates.clear();
+    for (auto const &edge : node->getOutEdges()) {
+      if (edge->hasSymbol()) {
+        candidates.push_back(edge.get());
+      }
+    }
+    std::ranges::sort(candidates, {}, edgeMergeKey);
+
+    // Sorting leaves mergeable edges in an ascending run, so each edge need
+    // only be offered to the one kept before it.
+    absorbed.clear();
+    NetlistEdge *keep = nullptr;
+    for (auto *edge : candidates) {
+      if (keep != nullptr && edgeGroupKey(keep) == edgeGroupKey(edge) &&
+          keep->bounds.isContiguousWith(edge->bounds)) {
+        keep->bounds = keep->bounds.unionWith(edge->bounds);
+        absorbed.push_back(edge);
+      } else {
+        keep = edge;
+      }
+    }
+
+    if (absorbed.empty()) {
+      continue;
+    }
+
+    // Ordered by address so the removal predicate stays logarithmic: it is
+    // applied to every edge of the node and of each affected target.
+    std::ranges::sort(absorbed);
+    node->removeOutEdgesIf([&absorbed](NetlistEdge const &edge) {
+      return std::ranges::binary_search(absorbed, &edge);
+    });
+  }
+}
+
+void NetlistGraph::buildIndex() const {
+  if (indexBuilt)
+    return;
+  for (auto const &node : nodes) {
+    auto path = node->getHierarchicalPath();
+    if (path.has_value()) {
+      nodeIndex[std::string(*path)].push_back(node.get());
+    }
+  }
+  indexBuilt = true;
+}
+
+auto NetlistGraph::lookup(std::string_view name) const -> NetlistNode * {
+  buildIndex();
+  auto it = nodeIndex.find(std::string(name));
+  if (it == nodeIndex.end() || it->second.empty())
+    return nullptr;
+  return it->second.front();
+}
+
+auto NetlistGraph::lookup(std::string_view name, DriverBitRange bounds) const
+    -> std::vector<NetlistNode *> {
+  buildIndex();
+  std::vector<NetlistNode *> result;
+  auto it = nodeIndex.find(std::string(name));
+  if (it == nodeIndex.end())
+    return result;
+  for (auto *node : it->second) {
+    auto nodeBounds = node->getBounds();
+    if (nodeBounds.has_value() && nodeBounds->overlaps(bounds)) {
+      result.push_back(node);
+    }
+  }
+  return result;
+}
+
+auto NetlistGraph::getDrivers(std::string_view name,
+                              DriverBitRange bounds) const
+    -> std::vector<NetlistNode *> {
+  std::unordered_set<NetlistNode *> seen;
+  std::vector<NetlistNode *> result;
+  for (auto const &node : nodes) {
+    for (auto const &edge : node->getOutEdges()) {
+      if (edge->symbol == nullptr || edge->symbol->hierarchicalPath != name) {
+        continue;
+      }
+      if (!edge->bounds.overlaps(bounds)) {
+        continue;
+      }
+      auto *source = &edge->getSourceNode();
+      if (seen.insert(source).second) {
+        result.push_back(source);
+      }
+    }
+  }
+  return result;
+}
+
+auto NetlistGraph::getDrivers(NetlistNode const &node) const
+    -> std::vector<NetlistNode *> {
+  std::unordered_set<NetlistNode *> seen;
+  std::vector<NetlistNode *> result;
+  for (auto const *edge : node.getInEdges()) {
+    auto *source = &edge->getSourceNode();
+    if (seen.insert(source).second) {
+      result.push_back(source);
+    }
+  }
+  return result;
+}
+
+auto NetlistGraph::getBitDrivers(std::string_view name,
+                                 DriverBitRange bounds) const
+    -> std::vector<BitDriver> {
+  std::vector<BitDriver> result;
+  for (auto const &node : nodes) {
+    for (auto const &edge : node->getOutEdges()) {
+      if (edge->symbol == nullptr || edge->symbol->hierarchicalPath != name) {
+        continue;
+      }
+      auto clipped = edge->bounds.intersection(bounds);
+      if (!clipped.has_value()) {
+        continue;
+      }
+      result.push_back(BitDriver{*clipped, &edge->getSourceNode()});
+    }
+  }
+  auto key = [](BitDriver const &b) {
+    return std::make_tuple(b.bounds.lower(), b.bounds.upper(), b.driver);
+  };
+  std::sort(
+      result.begin(), result.end(),
+      [&](BitDriver const &a, BitDriver const &b) { return key(a) < key(b); });
+  result.erase(std::unique(result.begin(), result.end(),
+                           [&](BitDriver const &a, BitDriver const &b) {
+                             return key(a) == key(b);
+                           }),
+               result.end());
+  return result;
+}
+
+auto NetlistGraph::getBitDrivers(std::string_view name) const
+    -> std::vector<BitDriver> {
+  // The whole signal: a wide range covers every driving edge, since a signal
+  // may be split across several nodes by bit-aligned resolution.
+  return getBitDrivers(name,
+                       DriverBitRange{0, std::numeric_limits<int32_t>::max()});
+}
+
+namespace {
+
+struct CombFanPredicate {
+  bool operator()(const NetlistEdge &edge) const {
+    return !edge.disabled && edge.getTargetNode().kind != NodeKind::State;
+  }
+};
+
+struct CombFanBackwardPredicate {
+  bool operator()(const NetlistEdge &edge) const {
+    return !edge.disabled && edge.getSourceNode().kind != NodeKind::State;
+  }
+};
+
+class CollectVisitor {
+public:
+  CollectVisitor(std::vector<NetlistNode *> &result) : result(result) {}
+  void visitedNode(NetlistNode &) {}
+  void visitNode(NetlistNode &node) { result.push_back(&node); }
+  void visitEdge(NetlistEdge &) {}
+  void popNode() {}
+
+private:
+  std::vector<NetlistNode *> &result;
+};
+
+} // namespace
+
+auto NetlistGraph::getCombFanOut(NetlistNode &node) const
+    -> std::vector<NetlistNode *> {
+  std::vector<NetlistNode *> result;
+  CollectVisitor visitor(result);
+  DepthFirstSearch<NetlistNode, NetlistEdge, CollectVisitor, CombFanPredicate,
+                   Direction::Forward>
+      dfs(visitor, node);
+  return result;
+}
+
+auto NetlistGraph::getCombFanIn(NetlistNode &node) const
+    -> std::vector<NetlistNode *> {
+  std::vector<NetlistNode *> result;
+  CollectVisitor visitor(result);
+  DepthFirstSearch<NetlistNode, NetlistEdge, CollectVisitor,
+                   CombFanBackwardPredicate, Direction::Backward>
+      dfs(visitor, node);
+  return result;
+}
+
+auto NetlistGraph::getSensitivity(NetlistNode &node) const
+    -> std::vector<SensitivitySource> {
+  std::vector<SensitivitySource> result;
+
+  auto collectFromState = [&](NetlistNode &state) {
+    SLANG_ASSERT(state.kind == NodeKind::State);
+    for (auto const &edge : state.getInEdges()) {
+      if (edge->disabled || edge->edgeKind == ast::EdgeKind::None) {
+        continue;
+      }
+      auto *source = &edge->getSourceNode();
+      auto duplicate =
+          std::any_of(result.begin(), result.end(), [&](auto const &existing) {
+            return existing.source == source &&
+                   existing.edgeKind == edge->edgeKind;
+          });
+      if (!duplicate) {
+        result.push_back({source, edge->edgeKind});
+      }
+    }
+  };
+
+  if (node.kind == NodeKind::State) {
+    collectFromState(node);
+    return result;
+  }
+
+  // Forward walk: collect State targets without traversing into them.
+  // getCombFanOut can't be reused — its predicate drops edges-to-State.
+  std::unordered_set<NetlistNode *> visited;
+  std::vector<NetlistNode *> stack;
+  visited.insert(&node);
+  stack.push_back(&node);
+  while (!stack.empty()) {
+    auto *cur = stack.back();
+    stack.pop_back();
+    for (auto const &edge : cur->getOutEdges()) {
+      if (edge->disabled) {
+        continue;
+      }
+      auto &target = edge->getTargetNode();
+      if (target.kind == NodeKind::State) {
+        collectFromState(target);
+        continue;
+      }
+      if (visited.insert(&target).second) {
+        stack.push_back(&target);
+      }
+    }
+  }
+  return result;
+}
+
+auto NetlistGraph::getConstantDrivers(NetlistNode &node) const
+    -> std::vector<NetlistNode *> {
+  auto fanIn = getCombFanIn(node);
+  std::vector<NetlistNode *> constants;
+  for (auto *n : fanIn) {
+    if (n == &node) {
+      continue;
+    }
+    switch (n->kind) {
+    case NodeKind::Constant:
+      constants.push_back(n);
+      break;
+    case NodeKind::State:
+      // Depends on a register: not constant-driven.
+      return {};
+    case NodeKind::Port:
+      // An undriven Port in the fan-in is a top-level input acting as
+      // a real external source. A driven Port is just a pass-through.
+      if (!n->as<Port>().isDriven()) {
+        return {};
+      }
+      break;
+    default:
+      // Variable / Assignment / Conditional / Case / Merge / Operation
+      // are pass-throughs: connectivity continues through them.
+      break;
+    }
+  }
+  if (constants.empty()) {
+    return {};
+  }
+  return constants;
+}
+
+auto NetlistGraph::findNodes(std::string_view pattern) const
+    -> std::vector<NetlistNode *> {
+  buildIndex();
+  std::string pat(pattern);
+  std::vector<NetlistNode *> result;
+  for (auto const &[name, nodeList] : nodeIndex) {
+    if (wildcardMatch(name.c_str(), pat.c_str())) {
+      result.insert(result.end(), nodeList.begin(), nodeList.end());
+    }
+  }
+  return result;
+}
+
+auto NetlistGraph::findNodesRegex(std::string_view pattern) const
+    -> std::vector<NetlistNode *> {
+  buildIndex();
+  std::regex re(pattern.begin(), pattern.end());
+  std::vector<NetlistNode *> result;
+  for (auto const &[name, nodeList] : nodeIndex) {
+    if (std::regex_match(name, re)) {
+      result.insert(result.end(), nodeList.begin(), nodeList.end());
+    }
+  }
+  return result;
+}
+
+auto NetlistGraph::getBlackBoxCoverage(NetlistNode const &node) const
+    -> BlackBoxCoverage {
+  auto path = node.getHierarchicalPath();
+  if (!path) {
+    return BlackBoxCoverage::Outside;
+  }
+  auto result = BlackBoxCoverage::Outside;
+  for (auto const &bbPath : blackBoxPaths) {
+    if (!path->starts_with(bbPath)) {
+      continue;
+    }
+    if (path->size() == bbPath.size()) {
+      return BlackBoxCoverage::Contained;
+    }
+    // The prefix must end on a path segment boundary.
+    if ((*path)[bbPath.size()] != '.') {
+      continue;
+    }
+    auto remainder = path->substr(bbPath.size() + 1);
+    if (node.kind == NodeKind::Port &&
+        remainder.find('.') == std::string_view::npos) {
+      result = BlackBoxCoverage::Boundary;
+    } else {
+      return BlackBoxCoverage::Contained;
+    }
+  }
+  return result;
+}

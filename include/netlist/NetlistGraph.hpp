@@ -1,0 +1,223 @@
+#pragma once
+
+#include "netlist/BuildProfile.hpp"
+#include "netlist/BuilderOptions.hpp"
+#include "netlist/Debug.hpp"
+#include "netlist/DirectedGraph.hpp"
+#include "netlist/NetlistEdge.hpp"
+#include "netlist/NetlistNode.hpp"
+#include "netlist/SymbolReference.hpp"
+#include "netlist/TextLocation.hpp"
+
+#include "slang/ast/SemanticFacts.h"
+
+#include <algorithm>
+#include <ranges>
+#include <regex>
+#include <span>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace slang {
+namespace ast {
+class Compilation;
+} // namespace ast
+namespace analysis {
+class AnalysisManager;
+} // namespace analysis
+} // namespace slang
+
+namespace slang::netlist {
+
+/// Classification of a node against a graph's black boxes.
+enum class BlackBoxCoverage {
+  /// Not covered by any black box.
+  Outside,
+  /// A port of a black-boxed instance.
+  Boundary,
+  /// Strictly inside a black box.
+  Contained,
+};
+
+/// Represent the netlist connectivity of an elaborated design.
+class NetlistGraph : public DirectedGraph<NetlistNode, NetlistEdge> {
+public:
+  FileTable fileTable;
+  SymbolTable symbolTable;
+
+  /// Build the netlist from an elaborated compilation.
+  ///
+  /// Caller is responsible for having run `VisitAll`, frozen the compilation,
+  /// and run the analysis manager prior to this call. \p options configures
+  /// the build, including parallel execution, thread pool size, and
+  /// precision upgrades; see `BuilderOptions`.
+  void build(ast::Compilation &compilation,
+             analysis::AnalysisManager &analysisManager,
+             BuilderOptions options = {});
+
+  /// Lookup a node in the graph by its hierarchical name.
+  ///
+  /// @param name The hierarchical name of the node.
+  /// @return A pointer to the node if found, or nullptr if not found.
+  [[nodiscard]] auto lookup(std::string_view name) const -> NetlistNode *;
+
+  /// Lookup nodes by hierarchical name and bit range.
+  ///
+  /// Returns all Port, Variable, and State nodes whose hierarchical path
+  /// matches @p name and whose bounds overlap with @p bounds.
+  [[nodiscard]] auto lookup(std::string_view name, DriverBitRange bounds) const
+      -> std::vector<NetlistNode *>;
+
+  /// Return the set of driver nodes for the symbol with the given hierarchical
+  /// @p name over the bit range @p bounds.
+  ///
+  /// A driver is any node that is the source of an edge annotated with a
+  /// matching symbol reference whose bounds overlap @p bounds. Each driver is
+  /// reported at most once.
+  [[nodiscard]] auto getDrivers(std::string_view name,
+                                DriverBitRange bounds) const
+      -> std::vector<NetlistNode *>;
+
+  /// Return the unique nodes with an incoming edge to @p node.
+  ///
+  /// This returns immediate drivers only. Use getCombFanIn for recursive
+  /// combinational fan-in.
+  [[nodiscard]] auto getDrivers(NetlistNode const &node) const
+      -> std::vector<NetlistNode *>;
+
+  /// A driver node paired with the exact bit range of a queried symbol that
+  /// it drives.
+  struct BitDriver {
+    DriverBitRange bounds;
+    NetlistNode *driver;
+  };
+
+  /// Return the per-bit drivers of the symbol @p name over @p bounds.
+  ///
+  /// Unlike getDrivers, which returns the deduplicated set of driver nodes,
+  /// this keeps one entry per contributing edge, each clipped to the
+  /// sub-range of @p name that the driver actually covers, so callers can
+  /// report bit-level provenance. Entries are sorted by ascending bit
+  /// position and deduplicated on (bounds, driver).
+  [[nodiscard]] auto getBitDrivers(std::string_view name,
+                                   DriverBitRange bounds) const
+      -> std::vector<BitDriver>;
+
+  /// Return the per-bit drivers of the entire symbol @p name.
+  ///
+  /// Equivalent to getBitDrivers over the symbol's whole width; use this when
+  /// no bit range is specified, since a symbol may be split across several
+  /// driver nodes by bit-aligned resolution.
+  [[nodiscard]] auto getBitDrivers(std::string_view name) const
+      -> std::vector<BitDriver>;
+
+  /// Return all nodes reachable from @p node via combinational edges in the
+  /// forward (fan-out) direction.  The traversal stops at State nodes.
+  [[nodiscard]] auto getCombFanOut(NetlistNode &node) const
+      -> std::vector<NetlistNode *>;
+
+  /// Return all nodes that can reach @p node via combinational edges in the
+  /// backward (fan-in) direction.  The traversal stops at State nodes.
+  [[nodiscard]] auto getCombFanIn(NetlistNode &node) const
+      -> std::vector<NetlistNode *>;
+
+  /// A clock/reset signal driving a State node, paired with its edge kind.
+  struct SensitivitySource {
+    NetlistNode *source;
+    ast::EdgeKind edgeKind;
+
+    auto operator==(SensitivitySource const &) const -> bool = default;
+  };
+
+  /// Clocks gating @p node: own edges for a State, otherwise the union of
+  /// sensitivity over every State reachable by combinational fan-out.
+  /// Deduplicated on (source, edgeKind).
+  [[nodiscard]] auto getSensitivity(NetlistNode &node) const
+      -> std::vector<SensitivitySource>;
+
+  /// Return the Constant nodes feeding @p node if its combinational fan-in
+  /// bottoms out only at Constants (i.e. the sink is tied off to literal
+  /// values). Returns an empty vector if any non-constant source reaches
+  /// @p node — namely a State node (depends on a register) or an undriven
+  /// top-level input Port (depends on an external signal) — or if @p node
+  /// has no Constant in its fan-in at all.
+  ///
+  /// Variables, Assignments, Conditionals, Cases, Merges, and driven Ports
+  /// in the fan-in are treated as pass-throughs.
+  [[nodiscard]] auto getConstantDrivers(NetlistNode &node) const
+      -> std::vector<NetlistNode *>;
+
+  /// Find named nodes whose hierarchical path matches the glob @p pattern.
+  ///
+  /// Supported wildcards:
+  ///   `*`        zero or more characters within a single path segment
+  ///              (does not cross `.`).
+  ///   `**`, `...`  zero or more characters including `.` (recursive).
+  ///   `?`        exactly one character within a single path segment.
+  [[nodiscard]] auto findNodes(std::string_view pattern) const
+      -> std::vector<NetlistNode *>;
+
+  /// Find named nodes whose hierarchical path matches the regex @p pattern.
+  [[nodiscard]] auto findNodesRegex(std::string_view pattern) const
+      -> std::vector<NetlistNode *>;
+
+  /// Return a view of all nodes of the specified kind.
+  ///
+  /// @param kind The kind of nodes to filter.
+  /// @return A view of nodes matching the specified kind.
+  [[nodiscard]]
+  auto filterNodes(NodeKind kind) const {
+    return nodes |
+           std::views::filter([kind](std::unique_ptr<NetlistNode> const &p) {
+             return p->kind == kind;
+           });
+  }
+
+  /// Collapse parallel edges that carry abutting or overlapping ranges of
+  /// the same symbol into one edge spanning the union of their ranges.
+  ///
+  /// Only edges sharing a source, a target, a symbol and an edge kind are
+  /// combined, so connectivity is unchanged. Run as the last step of build(),
+  /// where it establishes the invariant that each (source, target, symbol,
+  /// edge kind) relation holds one edge per maximal contiguous range,
+  /// regardless of the order in which those ranges were emitted. Edges added
+  /// afterwards may break that invariant.
+  void mergeParallelEdges();
+
+  /// Return the profiling data from the last build() call.
+  [[nodiscard]] auto getBuildProfile() const -> BuildProfile const & {
+    return buildProfile;
+  }
+
+  /// Set the profiling data (called internally by NetlistBuilder).
+  void setBuildProfile(BuildProfile const &profile) { buildProfile = profile; }
+
+  /// Record the hierarchical path of a black-boxed instance.
+  void addBlackBoxPath(std::string path) {
+    blackBoxPaths.push_back(std::move(path));
+  }
+
+  /// Return the hierarchical paths of the black-boxed instances.
+  [[nodiscard]] auto getBlackBoxPaths() const -> std::span<std::string const> {
+    return blackBoxPaths;
+  }
+
+  /// Classify a node against the recorded black-box instance paths.
+  ///
+  /// A Port node directly below a black-boxed instance is on the boundary;
+  /// any other node at or below a black-boxed instance is contained.
+  /// Nodes with no hierarchical path, or outside every box, are outside.
+  /// Containment takes precedence over the boundary when boxes nest.
+  [[nodiscard]] auto getBlackBoxCoverage(NetlistNode const &node) const
+      -> BlackBoxCoverage;
+
+private:
+  BuildProfile buildProfile;
+  std::vector<std::string> blackBoxPaths;
+  mutable bool indexBuilt = false;
+  mutable std::unordered_map<std::string, std::vector<NetlistNode *>> nodeIndex;
+  void buildIndex() const;
+};
+
+} // namespace slang::netlist

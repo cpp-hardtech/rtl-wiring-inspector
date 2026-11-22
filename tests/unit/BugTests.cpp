@@ -1,0 +1,570 @@
+#include "Test.hpp"
+
+#include <algorithm>
+#include <set>
+
+TEST_CASE("Slang #792: bus expression in ports", "[Bugs]") {
+  auto const &tree = (R"(
+module test (input [1:0] in_i,
+             output [1:0] out_o);
+  wire [1:0] in_s;
+  assign in_s = in_i;
+  nop i_nop(
+    .in_i(in_s[1:0]), // ok: in_s, in_i, {in_i[1], in_i[0]}
+    .out_o(out_o)
+ );
+endmodule
+
+module nop (input [1:0]  in_i,
+            output [1:0] out_o);
+   // individual bits access; ok: out_o = in_i;
+   assign out_o[0] = in_i[0];
+   assign out_o[1] = in_i[1];
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("test.in_i", "test.out_o"));
+}
+
+TEST_CASE("Slang #793: port name collision with unused modules", "[Bugs]") {
+  // Test that unused modules are not visited by the netlist builder.
+  auto const &tree = R"(
+module test (input i1,
+             input i2,
+             output o1
+             );
+   cell_a i_cell_a(.d1(i1),
+                   .d2(i2),
+                   .c(o1));
+endmodule
+
+module cell_a(input  d1,
+              input  d2,
+              output c);
+   assign c = d1 + d2;
+endmodule
+
+// unused
+module cell_b(input  a,
+              input  b,
+              output z);
+   assign z = a || b;
+endmodule
+
+// unused
+module cell_c(input  a,
+              input  b,
+              output z);
+   assign z = (!a) && b;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("test.i1", "test.o1"));
+}
+
+TEST_CASE("Slang #985: conditional generate blocks", "[Bugs]") {
+  // One branch of the generate conditional is uninstantiated.
+  auto const &tree = (R"(
+module top #(parameter X=0)(input logic a, input logic b, output logic out);
+  generate
+    if (X) begin
+      assign out = a;
+    end else begin
+      assign out = b;
+    end
+  endgenerate
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("top.b", "top.out"));
+}
+
+TEST_CASE("Slang #919: empty port hookup", "[Bugs]") {
+  auto const &tree = (R"(
+module foo (input logic i_in);
+endmodule
+
+module top ();
+  foo u_foo(.i_in());
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.graph.numNodes() == 1);
+}
+
+TEST_CASE("Slang #993: multiple blocking assignments of same variable in "
+          "always_comb",
+          "[Bugs]") {
+  auto const &tree = (R"(
+module t2 (input clk, output reg [31:0] nq);
+  reg [31:0] n;
+  always_comb begin
+    n = nq;
+    n = n + 1;
+  end
+  always_ff @(posedge clk)
+    nq <= n;
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.renderDot() == R"(digraph {
+  node [shape=record];
+  N1 [label="In port clk"]
+  N2 [label="Out port nq"]
+  N3 [label="Assignment"]
+  N4 [label="Assignment"]
+  N5 [label="Assignment"]
+  N6 [label="nq [31:0]"]
+  N1 -> N6 [label="clk[0]"]
+  N4 -> N4 [label="n[31:0]"]
+  N4 -> N5 [label="n[31:0]"]
+  N5 -> N6 [label="nq[31:0]"]
+  N6 -> N2 [label="nq[31:0]"]
+  N6 -> N3 [label="nq[31:0]"]
+}
+)");
+}
+
+TEST_CASE("Slang #1005: ignore concurrent assertions", "[Bugs]") {
+  // Test that we handle timing events inside concurrent assertions.
+  auto const &tree = (R"(
+module t33 #(
+  parameter MODE = 3'd0
+) (
+  input wire  clk,
+  input wire [15:0]l,
+  input wire [15:0]s,
+  input wire [15:0]c,
+  input wire  [1:0]b,
+  input wire       a
+);
+  reg   [15:0] c_n;
+  always @(s or l or c)
+  begin : c_inc
+    c_n = c + (l ^ s);
+  end
+
+  property test_prop;
+    @(posedge clk) disable iff (MODE != 3'd0)
+    !($isunknown({a,b,c})) &
+      a & (b == 2'b01)
+      |-> (c_n[15:12] == c[15:12]);
+  endproperty
+  tp_inst: assert property (test_prop) else
+        $error("prop error");
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.graph.numNodes() > 0);
+}
+
+TEST_CASE("Slang #1007: variable declarations in procedural blocks", "[Bugs]") {
+  auto const &tree = (R"(
+module m;
+  reg [3:0] x;
+  reg [15:0] v;
+  always @(v)
+  begin
+    integer i;
+    x = '0;
+    for (i = 0; i <= 15; i = i + 1)
+      if (v[i] == 1'b0)
+        x = i[3:0];
+  end
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.graph.numNodes() > 0);
+}
+
+TEST_CASE("Slang #1124: net initialisers", "[Bugs]") {
+  // Known limitation: net initialisers (wire d = a) are not yet tracked as
+  // data dependencies by the netlist builder, so no path is expected.
+  auto const &tree = (R"(
+module t;
+  reg a, b;
+  wire c;
+  initial begin
+    a <= 1;
+    b <= a;
+  end
+  assign c = a;
+  wire d = a;
+  wire e = d;
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(!test.pathExists("t.a", "t.d"));
+  CHECK(!test.pathExists("t.d", "t.e"));
+}
+
+TEST_CASE("Slang #1281: hierarchical reference processing", "[Bugs]") {
+  auto const &tree = (R"(
+module top();
+  initial begin
+    m2.c = 1'b0;
+  end
+  m1 m2();
+endmodule
+
+module m1();
+  reg c;
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.graph.numNodes() > 0);
+}
+
+TEST_CASE("Genvar index in modport array member access does not crash",
+          "[Bugs]") {
+  // When a generate loop drives a modport array member with a genvar index
+  // (e.g. assign i_if.arr[k] = d[k]), LSPVisitor visits both the array signal
+  // and the selector k (a Parameter-kind symbol in slang's AST).
+  // _resolveInterfaceRef previously hit SLANG_UNREACHABLE for symbol kinds
+  // other than Variable and ModportPort.  The fix silently ignores such
+  // symbols — they are constant indices, not interface signals.
+  auto const &tree = R"(
+interface I;
+  logic [1:0] arr;
+  modport mp_out(output arr);
+  modport mp_in(input arr);
+endinterface
+
+module writer (I.mp_out i_if, input logic [1:0] d);
+  for (genvar k = 0; k < 2; k++) begin
+    assign i_if.arr[k] = d[k];
+  end
+endmodule
+
+module reader (I.mp_in i_if, output logic [1:0] q);
+  for (genvar k = 0; k < 2; k++) begin
+    assign q[k] = i_if.arr[k];
+  end
+endmodule
+
+module m (input logic [1:0] a, output logic [1:0] out);
+  I i();
+  writer w(i, a);
+  reader r(i, out);
+endmodule
+)";
+  NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.out"));
+}
+
+TEST_CASE("Descending bit range in toPair does not assert in IntervalMap",
+          "[Bugs]") {
+  // DriverBitRange::toPair() was returning {left, right} verbatim.  For a
+  // ConstantRange whose left > right (e.g. a range-select a[3:0] which slang
+  // stores as ConstantRange{3, 0} before normalisation), this violates the
+  // IntervalMap assertion key.left <= key.right.  The fix normalises toPair()
+  // to always return {lower(), upper()} and normalises bounds at the start of
+  // ValueTracker::addDrivers.
+  auto const &tree = R"(
+module m (input logic [7:0] a, output logic [7:0] b);
+  logic [7:0] tmp;
+  always_comb begin
+    tmp = 8'h0;
+    tmp[3:0] = a[3:0];
+    tmp[7:4] = a[7:4];
+    b = tmp;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.b"));
+}
+
+TEST_CASE("VisitAll visits uninstantiated modules", "[Bugs]") {
+  // When using --top to select a specific top module, the VisitAll AST visitor
+  // forces elaboration of ALL module definitions including uninstantiated ones.
+  // This causes AssignmentPatternNoContext errors for '{default:'0} in
+  // port connections within those uninstantiated modules.
+  auto const &text = R"(
+package Pkg;
+  localparam int N = 4;
+  localparam int W = 32;
+endpackage
+
+module leaf import Pkg::*; (
+  input logic [W-1:0] data [N-1:0]
+);
+endmodule
+
+module unused_parent import Pkg::*; ();
+  leaf u0(.data('{default:'0}));
+endmodule
+
+module top();
+endmodule
+)";
+  // Set up compilation with --top top to isolate the top module,
+  // leaving unused_parent uninstantiated.
+  CompilationOptions options;
+  options.topModules.emplace("top");
+  Compilation compilation(options);
+  auto tree = SyntaxTree::fromText(text);
+  compilation.addSyntaxTree(tree);
+
+  // Check there are no errors before VisitAll.
+  auto diags = compilation.getAllDiagnostics();
+  CHECK(std::ranges::all_of(diags, [](auto &diag) { return !diag.isError(); }));
+
+  VisitAll va;
+  compilation.getRoot().visit(va);
+
+  // Check VisitAll did not introduce spurious errors from elaborating
+  // uninstantiated modules (e.g. AssignmentPatternNoContext).
+  auto diagsAfter = compilation.getAllDiagnostics();
+  CHECK(std::ranges::all_of(diagsAfter,
+                            [](auto &diag) { return !diag.isError(); }));
+
+  compilation.freeze();
+
+  AnalysisManager analysisManager;
+  analysisManager.analyze(compilation);
+
+  NetlistGraph graph;
+  graph.build(compilation, analysisManager, {.parallel = false});
+
+  // The top module is empty, so the netlist should have no nodes.
+  CHECK(graph.numNodes() == 0);
+}
+
+TEST_CASE("Always block with non-timed body does not assert", "[Bugs]") {
+  // An 'always' block whose body is a Block statement (begin...end) with
+  // timing control inside rather than at the top level was incorrectly
+  // cast to TimedStatement in determineEdgeKind, causing an assertion
+  // failure.
+  auto const &tree = R"(
+module m (input logic clk, input logic a, output logic b);
+  always begin
+    @(posedge clk);
+    b = a;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.b"));
+}
+
+TEST_CASE("Issue 18: reduced test case with merging of driver ranges in loops",
+          "[Bugs]") {
+  auto const &tree = R"(
+ module m #(parameter NUM_CONSUMERS = 2, NUM_CHANNELS = 4)(
+     input logic [NUM_CONSUMERS-1:0] read_valid,
+     input logic i_state [NUM_CHANNELS-1:0],
+     output logic o_state [NUM_CHANNELS-1:0]
+);
+     logic state_next [NUM_CHANNELS-1:0];
+     always_comb begin
+         state_next = i_state;
+         for (int i = 0; i < NUM_CHANNELS; i = i + 1) begin
+             for (int j = 0; j < NUM_CONSUMERS; j = j + 1) begin
+                 if (read_valid[j]) begin
+                     state_next[i] = 1;
+                 end
+             end
+         end
+     end
+     assign o_state = state_next;
+ endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.i_state", "m.o_state"));
+}
+
+TEST_CASE("Issue 108: edge annotations for distinct symbols are not "
+          "overwritten",
+          "[Bugs]") {
+  // One node drives another via two separate symbols, so the dependency
+  // needs a parallel edge per symbol rather than a single edge whose
+  // annotation is overwritten.
+  auto const &tree = R"(
+module m(input logic [1:0] i, output logic o);
+  logic x, y;
+  assign {x, y} = i;
+  assign o = x & y;
+endmodule
+)";
+  NetlistTest test(tree, BuilderOptions{.resolveAssignBits = false});
+  CHECK(test.getDrivers("m.x", {0, 0}).size() == 1);
+  CHECK(test.getDrivers("m.y", {0, 0}).size() == 1);
+}
+
+TEST_CASE("Issue 108: interleaved symbols on one node pair end up on one "
+          "edge each",
+          "[Bugs]") {
+  // Reads of two symbols alternate on the same (source, target) pair. Each
+  // gets its own parallel edge per range as the ranges arrive; by the time
+  // the build finishes, phase 5 has merged each symbol's ranges back into a
+  // single edge. Checked on both R-value resolution paths.
+  auto const &tree = R"(
+module m(input logic [3:0] i, output logic o);
+  logic [3:0] a, b;
+  assign {a, b} = {i, i};
+  assign o = (a[0] & b[0]) | (a[1] & b[1]) | (a[2] & b[2]) | (a[3] & b[3]);
+endmodule
+)";
+  for (auto parallel : {false, true}) {
+    NetlistTest test(tree, BuilderOptions{.resolveAssignBits = false,
+                                          .parallel = parallel,
+                                          .parallelRValueThreshold = 0});
+    CHECK(test.getBitDrivers("m.a", {3, 0}).size() == 1);
+    CHECK(test.getBitDrivers("m.b", {3, 0}).size() == 1);
+  }
+}
+
+TEST_CASE("Issue 108: sensitivity edges of different kinds are not "
+          "overwritten",
+          "[Bugs]") {
+  // One symbol reaches the same State node at two edge kinds. An edge
+  // carries a single kind, so each needs its own, rather than the second
+  // overwriting the first.
+  auto const &tree = R"(
+module m(input logic clk, input logic d, output logic q);
+  always @(posedge clk or negedge clk) q <= d;
+endmodule
+)";
+  const NetlistTest test(tree);
+
+  // Collect the kinds of every clk-annotated edge into the State node.
+  std::set<ast::EdgeKind> kinds;
+  for (auto const &node : test.graph) {
+    for (auto const &edge : node->getOutEdges()) {
+      if (edge->getTargetNode().kind == NodeKind::State &&
+          edge->symbol != nullptr &&
+          edge->symbol->hierarchicalPath == "m.clk") {
+        kinds.insert(edge->edgeKind);
+      }
+    }
+  }
+  CHECK(kinds == std::set<ast::EdgeKind>{ast::EdgeKind::PosEdge,
+                                         ast::EdgeKind::NegEdge});
+}
+
+TEST_CASE("Issue 103: a State node does not displace other blocks' drivers",
+          "[Bugs]") {
+  // A register is written by a clocked block over part of its width and by
+  // an initial block over all of it. Registering the State as driver must
+  // not evict the initial block's assignment from the overlapping bits,
+  // whichever order the two blocks are processed in.
+  auto const &clockedFirst = R"(
+module m(input logic clk, input logic [7:0] d, init,
+         output logic [7:0] o);
+  logic [7:0] q;
+  always @(posedge clk) q[7:1] <= d[7:1];
+  initial q = init;
+  assign o = q;
+endmodule
+)";
+  auto const &initialFirst = R"(
+module m(input logic clk, input logic [7:0] d, init,
+         output logic [7:0] o);
+  logic [7:0] q;
+  initial q = init;
+  always @(posedge clk) q[7:1] <= d[7:1];
+  assign o = q;
+endmodule
+)";
+  for (auto const *tree : {clockedFirst, initialFirst}) {
+    for (auto parallel : {false, true}) {
+      NetlistTest test(tree, parallel, /*parallelRValueThreshold=*/0);
+
+      // Bit 0 is outside the clocked block's range, so its only driver is
+      // the initial block's assignment. That same node must also drive the
+      // bits the clocked block writes.
+      auto initialDrivers = test.getDrivers("m.q", {0, 0});
+      REQUIRE(initialDrivers.size() == 1);
+      auto overlapDrivers = test.getDrivers("m.q", {7, 7});
+      CHECK(std::ranges::find(overlapDrivers, initialDrivers.front()) !=
+            overlapDrivers.end());
+    }
+  }
+}
+
+TEST_CASE("Issue 103: drivers reach a State created by a later block",
+          "[Bugs]") {
+  // A block that writes a register is connected to the node standing for
+  // the register's storage. That node may not exist yet when the block is
+  // processed, so the connection must not depend on which block runs
+  // first.
+  auto const &initialFirst = R"(
+module m(input logic clk, input logic [7:0] d, init,
+         output logic [7:0] o);
+  logic [7:0] q;
+  initial q = init;
+  always @(posedge clk) q <= d;
+  assign o = q;
+endmodule
+)";
+  auto const &clockedFirst = R"(
+module m(input logic clk, input logic [7:0] d, init,
+         output logic [7:0] o);
+  logic [7:0] q;
+  always @(posedge clk) q <= d;
+  initial q = init;
+  assign o = q;
+endmodule
+)";
+  for (auto const *tree : {initialFirst, clockedFirst}) {
+    for (auto parallel : {false, true}) {
+      NetlistTest test(tree, parallel, /*parallelRValueThreshold=*/0);
+      CHECK(test.pathExists("m.init", "m.o"));
+      CHECK(test.pathExists("m.d", "m.o"));
+    }
+  }
+}
+
+TEST_CASE("Issue 120: a partial-range co-driver reaches the register",
+          "[Bugs]") {
+  // A register written over its full width by a clocked block and over
+  // part of that width by another block. Reads of the register must see
+  // both, rather than resolving to whichever node covers the whole range.
+  auto const &clockedFirst = R"(
+module m(input logic clk, input logic [7:0] d, init,
+         output logic [7:0] o);
+  logic [7:0] q;
+  always @(posedge clk) q <= d;
+  initial q[3:0] = init[3:0];
+  assign o = q;
+endmodule
+)";
+  auto const &initialFirst = R"(
+module m(input logic clk, input logic [7:0] d, init,
+         output logic [7:0] o);
+  logic [7:0] q;
+  initial q[3:0] = init[3:0];
+  always @(posedge clk) q <= d;
+  assign o = q;
+endmodule
+)";
+  for (auto const *tree : {clockedFirst, initialFirst}) {
+    for (auto parallel : {false, true}) {
+      NetlistTest test(tree, parallel, /*parallelRValueThreshold=*/0);
+      CHECK(test.pathExists("m.init", "m.o"));
+      CHECK(test.pathExists("m.d", "m.o"));
+    }
+  }
+}
+
+TEST_CASE(
+    "Issue 120: a partial-range co-driver reaches only the bits it drives",
+    "[Bugs]") {
+  // The co-driver writes bits the output does not read, so it must not
+  // reach that output. Routing it through the register's node instead of
+  // its readers would connect the two via disjoint bit ranges.
+  auto const &tree = R"(
+module m(input logic clk, input logic [7:0] d, init, output logic [3:0] o);
+  logic [7:0] q;
+  always @(posedge clk) q <= d;
+  initial q[3:0] = init[3:0];
+  assign o = q[7:4];
+endmodule
+)";
+  for (auto parallel : {false, true}) {
+    NetlistTest test(tree, parallel, /*parallelRValueThreshold=*/0);
+    CHECK(test.findPath("m.init", "m.o").empty());
+    CHECK(test.pathExists("m.d", "m.o"));
+  }
+}

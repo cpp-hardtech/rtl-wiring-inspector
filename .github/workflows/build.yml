@@ -1,0 +1,108 @@
+name: Build and test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CTEST_OUTPUT_ON_FAILURE: 1
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/cpm_modules
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: clang-release
+            os: ubuntu-latest
+          - preset: clang-sanitize
+            os: ubuntu-latest
+          - preset: gcc-release
+            os: ubuntu-latest
+          - preset: macos-release
+            os: macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Install dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # 1. Properly handle the LLVM Keyring
+        sudo mkdir -p /etc/apt/keyrings
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/llvm.gpg
+
+        # 2. Add LLVM repo using the keyring
+        echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+
+        # 3. Add Toolchain PPA (and update)
+        # We use -y to automate and it performs a refresh automatically
+        sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+
+        # 4. Install with a retry mechanism for network flakiness
+        MAX_RETRIES=3
+        for i in $(seq 1 $MAX_RETRIES); do
+          sudo apt-get install -y valgrind g++-14 g++-11 clang-21 clang-tidy-21 ccache && break || \
+          if [ $i -lt $MAX_RETRIES ]; then echo "Retry $i..."; sleep 5; sudo apt-get update; else exit 1; fi
+        done
+
+    - name: Install ccache (macOS)
+      if: matrix.os == 'macos-latest'
+      run: brew install ccache
+
+    - uses: maxim-lobanov/setup-xcode@v1
+      if: matrix.os == 'macos-latest'
+      with:
+        xcode-version: 'latest'
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version-file: "pyproject.toml"
+
+    - name: Install Python dependencies
+      run: python -m pip install tabulate
+
+    - name: ccache cache
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/ccache
+        key: ${{ github.workflow }}-ccache-${{ matrix.preset }}-${{ github.sha }}
+        restore-keys: |
+            ${{ github.workflow }}-ccache-${{ matrix.preset }}-
+
+    # Cache CPM modules
+    - uses: actions/cache@v3
+      with:
+        path: "**/cpm_modules"
+        key: ${{ github.workflow }}-cpm-modules-${{ matrix.preset }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+        restore-keys: |
+            ${{ github.workflow }}-cpm-modules-${{ matrix.preset }}-
+
+    # Cache CMake dependencies
+    - uses: actions/cache@v3
+      with:
+        path: "**/_deps"
+        key: ${{ github.workflow }}-cmake-deps-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt', '**/CMakeLists.txt') }}
+        restore-keys: |
+            ${{ github.workflow }}-cmake-deps-${{ matrix.preset }}-
+
+    - name: Configure CMake
+      run: cmake --preset=${{ matrix.preset }} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+    - name: Build
+      run: cmake --build build/${{ matrix.preset }}
+
+    - name: Test
+      run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure --no-tests=error
+
+    - name: Valgrind unit tests
+      if: matrix.preset == 'clang-release'
+      run: valgrind build/clang-release/tests/unit/netlist_unittests

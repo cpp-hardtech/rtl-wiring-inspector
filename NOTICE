@@ -1,0 +1,16 @@
+NOTICE
+
+This repository is a derivative work of the slang-netlist project, originally
+published at https://github.com/jameshanlon/slang-netlist and licensed under
+the MIT License.
+
+The original copyright notice and permission notice are retained unmodified in
+the LICENSE file: Copyright (c) 2024 James Hanlon.
+
+Modifications in this repository (documentation, project naming, repository
+branding, removal of upstream CI configuration) and any future contributions
+are Copyright (c) 2026 cpp-hardtech.
+
+Under the MIT License this derivative work may be used, copied, modified and
+redistributed provided the above copyright notice and permission notice are
+included in all copies or substantial portions of the software.

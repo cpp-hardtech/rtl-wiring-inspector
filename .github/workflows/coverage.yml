@@ -1,0 +1,54 @@
+name: Coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  linux-coverage:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Install dependencies
+      run: |
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main"
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+        sudo apt-get update
+        sudo apt-get install -y clang-21 llvm-21 llvm-21-dev
+        sudo ln -s /usr/bin/llvm-cov-21 /usr/bin/llvm-cov
+        sudo ln -s /usr/bin/llvm-profdata-21 /usr/bin/llvm-profdata
+
+    # Cache CMake dependencies
+    - uses: actions/cache@v3
+      with:
+        path: "**/_deps"
+        key: ${{ github.workflow }}-cmake-deps-${{ hashFiles('CMakeLists.txt', '**/CMakeLists.txt') }}
+        restore-keys: |
+            ${{ github.workflow }}-cmake-deps-
+
+    - name: Configure CMake
+      run: cmake --preset=clang-coverage
+
+    - name: Build
+      run: cmake --build build/clang-coverage
+
+    - name: Run tests
+      run: cmake --build build/clang-coverage -t coverage-run
+
+    - name: Process coverage info
+      run: cmake --build build/clang-coverage -t coverage-lcov
+
+    - name: Submit to codecov.io
+      uses: codecov/codecov-action@v5
+      with:
+        files: build/clang-coverage/coverage_output/coverage_report.lcov
+        plugins: noop
+        disable_search: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true

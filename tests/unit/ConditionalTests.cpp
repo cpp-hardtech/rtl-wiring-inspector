@@ -1,0 +1,525 @@
+#include "Test.hpp"
+
+TEST_CASE("If statement with else branch assigning constants",
+          "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a, output logic b);
+  always_comb begin
+    if (a) begin
+      b = 1;
+    end else begin
+      b = 0;
+    end
+  end
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.renderDot() == R"(digraph {
+  node [shape=record];
+  N1 [label="In port a"]
+  N2 [label="Out port b"]
+  N3 [label="Conditional"]
+  N4 [label="Assignment"]
+  N5 [label="Const 1'b1"]
+  N6 [label="Assignment"]
+  N7 [label="Const 1'b0"]
+  N8 [label="Merge"]
+  N1 -> N3 [label="a[0]"]
+  N3 -> N4
+  N3 -> N6
+  N4 -> N8
+  N4 -> N2 [label="b[0]"]
+  N5 -> N4
+  N6 -> N8
+  N6 -> N2 [label="b[0]"]
+  N7 -> N6
+}
+)");
+}
+
+TEST_CASE("If statement with else branch assigning variables",
+          "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a, input logic b, input logic c, output logic d);
+  always_comb
+    if (a) begin
+      d = b;
+    end else begin
+      d = c;
+    end
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.d"));
+  CHECK(test.pathExists("m.b", "m.d"));
+  CHECK(test.pathExists("m.c", "m.d"));
+  CHECK(test.renderDot() == R"(digraph {
+  node [shape=record];
+  N1 [label="In port a"]
+  N2 [label="In port b"]
+  N3 [label="In port c"]
+  N4 [label="Out port d"]
+  N5 [label="Conditional"]
+  N6 [label="Assignment"]
+  N7 [label="Assignment"]
+  N8 [label="Merge"]
+  N1 -> N5 [label="a[0]"]
+  N2 -> N6 [label="b[0]"]
+  N3 -> N7 [label="c[0]"]
+  N5 -> N6
+  N5 -> N7
+  N6 -> N8
+  N6 -> N4 [label="d[0]"]
+  N7 -> N8
+  N7 -> N4 [label="d[0]"]
+}
+)");
+}
+
+TEST_CASE("Ternary operator in continuous assignment", "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a, input logic b, input logic ctrl, output logic c);
+  assign c = ctrl ? a : b;
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.c"));
+  CHECK(test.pathExists("m.b", "m.c"));
+  CHECK(test.pathExists("m.ctrl", "m.c"));
+  CHECK(test.renderDot() == R"(digraph {
+  node [shape=record];
+  N1 [label="In port a"]
+  N2 [label="In port b"]
+  N3 [label="In port ctrl"]
+  N4 [label="Out port c"]
+  N5 [label="Assignment"]
+  N1 -> N5 [label="a[0]"]
+  N2 -> N5 [label="b[0]"]
+  N3 -> N5 [label="ctrl[0]"]
+  N5 -> N4 [label="c[0]"]
+}
+)");
+}
+
+TEST_CASE("Four-way case statement", "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic [1:0] a, output logic b);
+  always_comb
+    case (a)
+      2'b00: b = 0;
+      2'b01: b = 1;
+      2'b10: b = 2;
+      2'b11: b = 3;
+    endcase
+endmodule
+)");
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.b"));
+  CHECK(test.renderDot() == R"(digraph {
+  node [shape=record];
+  N1 [label="In port a"]
+  N2 [label="Out port b"]
+  N3 [label="Case"]
+  N4 [label="Assignment"]
+  N5 [label="Const 1'b0"]
+  N6 [label="Assignment"]
+  N7 [label="Const 1'b1"]
+  N8 [label="Merge"]
+  N9 [label="Assignment"]
+  N10 [label="Const 1'b0"]
+  N11 [label="Merge"]
+  N12 [label="Assignment"]
+  N13 [label="Const 1'b1"]
+  N14 [label="Merge"]
+  N1 -> N3 [label="a[1:0]"]
+  N3 -> N4
+  N3 -> N6
+  N3 -> N9
+  N3 -> N12
+  N4 -> N8
+  N4 -> N2 [label="b[0]"]
+  N5 -> N4
+  N6 -> N8
+  N6 -> N2 [label="b[0]"]
+  N7 -> N6
+  N8 -> N11
+  N9 -> N11
+  N9 -> N2 [label="b[0]"]
+  N10 -> N9
+  N11 -> N14
+  N12 -> N14
+  N12 -> N2 [label="b[0]"]
+  N13 -> N12
+}
+)");
+}
+
+TEST_CASE("Variable is not assigned on all control paths (else)",
+          "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a, output logic y);
+  logic t;
+  always_comb begin
+    if (a) t = 1;
+  end
+  assign y = t;
+endmodule
+  )");
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.y"));
+}
+
+TEST_CASE("Variable is not assigned on all control paths (then)",
+          "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a, output logic y);
+  logic t;
+  always_comb begin
+    if (a) begin end
+    else t = 1;
+  end
+  assign y = t;
+endmodule
+  )");
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.y"));
+}
+
+TEST_CASE("Unreachable assignment is ignored in data flow analysis",
+          "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a, input logic b, output logic y);
+  logic t;
+  always_comb begin
+    if (0) t = a;
+    else   t = b;
+  end
+  assign y = t;
+endmodule
+  )");
+  const NetlistTest test(tree);
+  // Only b should be a valid path to y, a should not.
+  CHECK(!test.pathExists("m.a", "m.y"));
+  CHECK(test.pathExists("m.b", "m.y"));
+}
+
+TEST_CASE("Merge two control paths assigning to different parts of a vector",
+          "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a,
+         input logic b,
+         input logic c,
+         output logic x,
+         output logic y);
+  logic [1:0] t;
+  always_comb
+    if (a) begin
+      t[0] = b;
+    end else begin
+      t[1] = c;
+    end
+  assign x =  t[0];
+  assign y =  t[1];
+endmodule
+  )");
+  const NetlistTest test(tree);
+  // Both b and c should be valid paths to y.
+  CHECK(test.pathExists("m.b", "m.x"));
+  CHECK(test.pathExists("m.c", "m.y"));
+}
+
+TEST_CASE("Merge two control paths assigning to the same part of a vector",
+          "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a,
+         input logic b,
+         input logic c,
+         output logic x);
+  logic [1:0] t;
+  always_comb
+    if (a) begin
+      t[1] = b;
+    end else begin
+      t[1] = c;
+    end
+  assign x =  t[1];
+endmodule
+  )");
+  const NetlistTest test(tree);
+  // Both b and c should be valid paths to x.
+  CHECK(test.pathExists("m.b", "m.x"));
+  CHECK(test.pathExists("m.c", "m.x"));
+}
+
+TEST_CASE("Merge two control paths assigning to overlapping of a vector",
+          "[Conditionals]") {
+  auto const &tree = (R"(
+module m(input logic a,
+         input logic b,
+         input logic c,
+         input logic d,
+         output logic x,
+         output logic y,
+         output logic z);
+  logic [2:0] t;
+  always_comb
+    if (a) begin
+      t[0] = d;
+      t[1] = b;
+    end else begin
+      t[1] = c;
+      t[2] = d;
+    end
+  assign x =  t[0];
+  assign y =  t[1];
+  assign z =  t[2];
+endmodule
+  )");
+  const NetlistTest test(tree);
+  // Both b and c should be valid paths to y.
+  CHECK(test.pathExists("m.a", "m.x"));
+  CHECK(test.pathExists("m.b", "m.y"));
+  CHECK(test.pathExists("m.c", "m.y"));
+  CHECK(test.pathExists("m.d", "m.z"));
+}
+
+TEST_CASE("Nested conditionals assigning variables", "[Conditionals]") {
+  // Test that the variables in multiple nested levels of conditions are
+  // correctly added as dependencies of the output variable.
+  auto const &tree = R"(
+ module m(input a, input b, input c, input sel_a, input sel_b, output reg f);
+  always @(*) begin
+    if (sel_a == 1'b0) begin
+      if (sel_b == 1'b0)
+        f = a;
+      else
+        f = b;
+    end else begin
+      f = c;
+    end
+  end
+ endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.f"));
+  CHECK(test.pathExists("m.b", "m.f"));
+  CHECK(test.pathExists("m.c", "m.f"));
+  CHECK(test.pathExists("m.sel_a", "m.f"));
+  CHECK(test.pathExists("m.sel_b", "m.f"));
+}
+
+TEST_CASE("Constant condition eliminates branch", "[Conditionals]") {
+  auto const &tree = R"(
+module m(input logic a, output logic b);
+  always_comb begin
+    if (1)
+      b = a;
+    else
+      b = 0;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.b"));
+  // No Conditional node should be created for constant conditions.
+  auto conditionals = test.graph.filterNodes(NodeKind::Conditional);
+  int count = 0;
+  for (auto &n : conditionals) {
+    (void)n;
+    count++;
+  }
+  CHECK(count == 0);
+}
+
+TEST_CASE("Reference after a ternary operator in an opaque expression",
+          "[Conditionals]") {
+  // References visited after a conditional's arms rejoin must keep their
+  // dependency on the assignment.
+  auto const &tree = R"(
+module m(input logic c, input logic [7:0] a, input logic [7:0] b,
+         input logic [7:0] mask, output logic [7:0] y);
+  assign y = (c ? a : b) & mask;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.y"));
+  CHECK(test.pathExists("m.b", "m.y"));
+  CHECK(test.pathExists("m.c", "m.y"));
+  CHECK(test.pathExists("m.mask", "m.y"));
+}
+
+TEST_CASE("Reference after a ternary operator in a procedural block",
+          "[Conditionals]") {
+  auto const &tree = R"(
+module m(input logic c, input logic [7:0] a, input logic [7:0] b,
+         input logic [7:0] mask, output logic [7:0] y);
+  always_comb y = (c ? a : b) & mask;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.y"));
+  CHECK(test.pathExists("m.b", "m.y"));
+  CHECK(test.pathExists("m.c", "m.y"));
+  CHECK(test.pathExists("m.mask", "m.y"));
+}
+
+TEST_CASE("Statement after an empty conditional is not control dependent",
+          "[Conditionals]") {
+  // The pending control edge belongs to the branch, not to what follows it.
+  auto const &tree = R"(
+module m(input logic c, input logic a, output logic z);
+  always_comb begin
+    if (c) begin end else begin end
+    z = a;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.z"));
+  CHECK(!test.pathExists("m.c", "m.z"));
+}
+
+TEST_CASE("Pattern-bearing ternary operator drives its target",
+          "[Conditionals]") {
+  // A pattern match is opaque to the netlist, but the subject and both
+  // arms must still reach the target.
+  auto const &continuous = R"(
+module m(input logic [7:0] v, input logic [7:0] a, input logic [7:0] b,
+         output logic [7:0] y);
+  assign y = v matches 8'hAA ? a : b;
+endmodule
+)";
+  auto const &procedural = R"(
+module m(input logic [7:0] v, input logic [7:0] a, input logic [7:0] b,
+         output logic [7:0] y);
+  always_comb y = v matches 8'hAA ? a : b;
+endmodule
+)";
+  for (auto const *tree : {continuous, procedural}) {
+    for (auto resolveBits : {false, true}) {
+      NetlistTest test(tree, BuilderOptions{.resolveAssignBits = resolveBits});
+      CHECK(!test.getDrivers("m.y", {0, 7}).empty());
+      CHECK(test.pathExists("m.v", "m.y"));
+      CHECK(test.pathExists("m.a", "m.y"));
+      CHECK(test.pathExists("m.b", "m.y"));
+    }
+  }
+}
+
+TEST_CASE("Reference after a pattern-bearing ternary in an opaque expression",
+          "[Conditionals]") {
+  auto const &tree = R"(
+module m(input logic [7:0] v, input logic [7:0] a, input logic [7:0] b,
+         input logic [7:0] mask, output logic [7:0] y);
+  assign y = (v matches 8'hAA ? a : b) & mask;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.v", "m.y"));
+  CHECK(test.pathExists("m.a", "m.y"));
+  CHECK(test.pathExists("m.b", "m.y"));
+  CHECK(test.pathExists("m.mask", "m.y"));
+}
+
+TEST_CASE("Pattern-bearing if statement keeps earlier definitions",
+          "[Conditionals]") {
+  // Losing the flow state across the pattern would drop both the
+  // reaching definition of the temporary and the control edges.
+  auto const &tree = R"(
+module m(input logic [7:0] v, input logic [7:0] a, input logic [7:0] b,
+         output logic [7:0] y);
+  logic [7:0] t;
+  always_comb begin
+    t = a;
+    if (v matches 8'hAA) y = t;
+    else y = b;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.v", "m.y"));
+  CHECK(test.pathExists("m.a", "m.y"));
+  CHECK(test.pathExists("m.b", "m.y"));
+}
+
+TEST_CASE("Pattern-bearing if statement with a constant subject is not "
+          "folded away",
+          "[Conditionals]") {
+  // Evaluating a pattern condition yields the subject, so a constant
+  // subject must not be mistaken for a constant condition.
+  auto const &tree = R"(
+module m(input logic [7:0] a, input logic [7:0] b, output logic [7:0] y);
+  localparam logic [7:0] C = 8'hAA;
+  logic [7:0] t;
+  always_comb begin
+    t = a;
+    if (C matches 8'hAA) y = t;
+    else y = b;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.y"));
+  CHECK(test.pathExists("m.b", "m.y"));
+}
+
+TEST_CASE("Pattern combined with a short-circuit condition", "[Conditionals]") {
+  // The '&&&' chain mixes an ordinary short-circuit condition with a
+  // pattern; both must reach the conditional, and each arm must stay
+  // control dependent on it.
+  auto const &tree = R"(
+module m(input logic p, input logic q, input logic [7:0] v,
+         input logic [7:0] a, input logic [7:0] b, output logic [7:0] y);
+  always_comb begin
+    if (p && q &&& v matches 8'hAA) y = a;
+    else y = b;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.p", "m.y"));
+  CHECK(test.pathExists("m.q", "m.y"));
+  CHECK(test.pathExists("m.v", "m.y"));
+  CHECK(test.pathExists("m.a", "m.y"));
+  CHECK(test.pathExists("m.b", "m.y"));
+}
+
+TEST_CASE("Pattern-bearing ternary used inside a condition", "[Conditionals]") {
+  // A branching subject leaves the state split, since the base class only
+  // rejoins outside a condition. Both arms must still be read.
+  auto const &tree = R"(
+module m(input logic c, input logic p, input logic x, input logic r,
+         input logic a, input logic b, output logic z);
+  logic t;
+  always_comb begin
+    t = a;
+    if (c && (!p matches 1'b1 ? x : r)) z = t;
+    else z = b;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.x", "m.z"));
+  CHECK(test.pathExists("m.r", "m.z"));
+  CHECK(test.pathExists("m.c", "m.z"));
+  CHECK(test.pathExists("m.a", "m.z"));
+  CHECK(test.pathExists("m.b", "m.z"));
+}
+
+TEST_CASE("Pattern-bearing ternary with a branching arm", "[Conditionals]") {
+  auto const &tree = R"(
+module m(input logic c, input logic p, input logic q, input logic x,
+         input logic r, input logic a, input logic b, output logic z);
+  always_comb begin
+    if (c && (p matches 1'b1 ? (x && q) : r)) z = a;
+    else z = b;
+  end
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.x", "m.z"));
+  CHECK(test.pathExists("m.q", "m.z"));
+  CHECK(test.pathExists("m.r", "m.z"));
+  CHECK(test.pathExists("m.a", "m.z"));
+  CHECK(test.pathExists("m.b", "m.z"));
+}

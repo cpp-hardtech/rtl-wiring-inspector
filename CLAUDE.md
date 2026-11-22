@@ -1,0 +1,167 @@
+# CLAUDE.md
+
+This file provides guidance to coding agents when working with code in this repository.
+
+## Build Commands
+
+Configure using a CMake preset (see `CMakePresets.json` for options; `CMakeUserPresets.json` for local overrides):
+
+```sh
+cmake --preset macos-debug        # configure (macOS)
+cmake --preset clang-debug        # configure (Linux, clang)
+cmake --build build/macos-debug   # build
+```
+
+Python bindings are off by default (`option(ENABLE_PY_BINDINGS ... OFF)` in `CMakeLists.txt`); the `clang-debug`/`clang-release`/`gcc-debug`/`gcc-release`/`macos-debug`/`macos-release` presets turn them on. Pass `-DENABLE_PY_BINDINGS=ON` when configuring with any other preset.
+
+Run all tests:
+
+```sh
+ctest --test-dir build/macos-debug
+```
+
+Run a single unit test (Catch2 filters by a positional test-name pattern or
+`[tag]`):
+
+```sh
+./build/macos-debug/tests/unit/netlist_unittests "test name pattern"
+./build/macos-debug/tests/unit/netlist_unittests "[Wildcard]"
+```
+
+Run only the Python driver tests:
+
+```sh
+ctest --test-dir build/macos-debug -R python-driver-tests
+```
+
+## Code Style
+
+- Follow [LLVM Coding Standards](https://llvm.org/docs/CodingStandards.html) with these exceptions:
+  - 80-column width
+  - Functions, parameters, and local variables use lowerCamelCase (not UpperCase)
+  - `#pragma once` instead of `#ifdef` guards
+  - Exceptions are generally not permitted.
+- Run `clang-format` with the project's local `.clang-format` settings before committing.
+- Install pre-commit hooks (`pip install pre-commit && pre-commit install`); they run automatically on commit: `clang-format` and `cmake-format` for C++/CMake, and `black`, `flake8`, and `isort` for Python.
+- Library code lives in the `slang::netlist` namespace; the reporting visitors in `include/report/` live in `slang::report`.
+- Keep comments short and concise. Do not add commentary that is related to the
+  process of development. Prefer high level explanations rather than specific
+  references to the code structure and naming.
+- Always comment public API functions/methods and classes with an appropriate
+  docstring or doxygen syntax.
+- Format Python docstrings with the triple-quotes on separate lines.
+
+## Workflow
+
+- When changes have been completed, review the patch in detail to look for
+  opportunities for simplification.
+- Do not sign commits with `Co-authored-by: ...` trailers.
+
+## Architecture
+
+RTL Wiring Inspector is a C++ library that builds a **dependency graph** (the "netlist") over an elaborated SystemVerilog AST provided by [slang](https://sv-lang.com). The graph captures source-level static connectivity at bit-level granularity.
+
+Generated documentation lives in `docs/`: `user-guide.dox` covers CLI usage, `developer-guide.dox` covers internals, and `mainpage.dox` is the Doxygen entry point.
+
+### Core Components
+
+**Graph data structures** (`include/netlist/`):
+- `DirectedGraph<NodeType, EdgeType>`: generic directed graph template
+- `NetlistGraph`: specialization holding `NetlistNode`/`NetlistEdge`; the central artifact of the library
+- `NetlistNode`: polymorphic base; subtypes: `Port` (I/O), `Variable` (wire/reg), `State` (sequential persistent value), `Assignment`, `Conditional`, `Case`, `Merge` (branch join), `Constant` (literal value driver), `Operation` (a binary, unary or conditional operator; opt-in, see below). Nodes represent operations or state
+- `NetlistEdge`: directed edge (producer→consumer) annotated with driven symbol, bit range, and `ast::EdgeKind` (clock sensitivity). Edges represent data dependencies
+
+**Graph construction** (`source/`, `include/netlist/`):
+- `NetlistBuilder`: main AST visitor (extends `slang::ast::ASTVisitor`). Composed of `NodeFactory`, `PortConnectionHandler`, `PendingRvalueQueue`, `CanonicalBodyResolver`, and a `BuildPipeline` that owns the five-phase orchestration
+- `BuildPipeline`: orchestrates the five-phase build: (1) sequential AST traversal to create ports/variables/instances and collect deferred DFA blocks, (2) DFA dispatch over deferred blocks (parallel when `options.parallel`), (3) drain thread-local deferred work, (4) resolve deferred variable hookups and then pending R-values into graph edges (parallel when above threshold), (5) merge parallel edges so the edge set is canonical. Anything a Phase 2 task reads from shared state must already be complete, so lookups of nodes Phase 2 itself creates are deferred to Phase 4
+- `DataFlowAnalysis`: extends `slang::analysis::AbstractFlowAnalysis`; computes **reaching definitions** (which nodes last wrote each bit range), unlike slang's `DefaultDFA` which only tracks whether ranges are driven. Handles procedural blocks (always/initial) including if/case branching, loop unrolling, and non-blocking assignments
+- `NodeFactory`: centralizes node allocation; registers each new node with the `NetlistGraph` and (for value-bearing kinds) records the (symbol, bounds) → node mapping in the builder's `VariableTracker`
+- `PortConnectionHandler`: handles port-connection wiring; owns the slice allocator and `CutRegistry` that propagates concat-shaped actuals' bit boundaries down to formal ports
+- `PendingRvalueQueue`: accumulates the work deferred out of Phase 2 — pending R-values and variable hookups — thread-local per task to avoid contention, then resolves both into edges in Phase 4
+- `CanonicalBodyResolver`: redirects driver queries for non-canonical instance bodies to their canonical counterparts, since slang's `AnalysisManager` stores drivers only against canonical bodies
+- `ValueTracker` / `VariableTracker`: interval-map-based structures that track which netlist nodes drive which bit ranges of each symbol
+- `DriverMap` / `CutRegistry`: interval-map-keyed driver lookup and the per-symbol cut-point set used by the bit-aligned path
+- `BitSlice` / `BitSliceList`: decomposition of an expression into contiguous bit slices with named sources; consumed by `alignSegments` for bit-aligned dependency resolution
+- `ExternalManager<T>`: handle-based allocator used because `IntervalMap` values must be trivially copyable
+
+**Common utilities** (`include/common/`):
+- `Utilities`: table formatter and source-location stringifier shared by the netlist library and reporting tools
+- `Wildcard`: glob-style matching (`*`, `**`/`...`, `?`) and subtree containment (`pathInScope`) over `.`-separated hierarchical names; used by symbol-selection options and the `--scope`/`--name` filters in both `rtl-wiring-inspector` and `rtl-report`
+
+**Analysis and queries** (`include/netlist/`):
+- `PathFinder`: DFS-based search between two `NetlistNode`s; returns a `NetlistPath`
+- `CombLoops` / `CycleDetector`: detects combinational loops using edge-kind filtering (only traverses non-clocked edges)
+- `DepthFirstSearch`: generic DFS template used by both `PathFinder` and `CycleDetector`
+- `NetlistSerializer`: JSON serialise/deserialise for a `NetlistGraph` (versioned format)
+- `NetlistDot`: DOT-format renderer for visualizing a `NetlistGraph`
+
+**Tooling**:
+- `tools/driver/driver.cpp`: `rtl-wiring-inspector` CLI binary (links against the `netlist` library)
+- `tools/report/report.cpp`: `rtl-report` CLI binary, the companion tool to `rtl-wiring-inspector` for surfacing AST-level information during design exploration. Offers `--ports`, `--variables`, `--drivers`, and `--ast-json` modes; the three tabular modes accept `--format=table|json`, `-o/--output`, and the shared `--scope`/`--name` glob filters. Uses the CRTP `ReportVisitorBase` in `include/report/` and the three concrete visitors (`ReportPorts`, `ReportVariables`, `ReportDrivers`)
+- `bindings/python/rtl_wiring_inspector.cpp`: nanobind Python module (`rtl_wiring_inspector`); enabled with `-DENABLE_PY_BINDINGS=ON`. Built in nanobind's split mode against the same `nanobind_backend` runtime as pyslang, so slang objects pass between the two extensions
+
+**Bit-aligned dependency resolution** (default-on, controlled by `BuilderOptions::resolveAssignBits` and the `--no-resolve-assign-bits` CLI flag): assignments and port connections are decomposed into a `BitSliceList` per side and zipped onto a common cut-point grid via `alignSegments`, so concatenations, replications, equal-width `?:`, and width-changing conversions (with zero/sign-extension padding) produce per-bit edges. Anything else, such as arithmetic, bitwise, relational, reductions, function calls, streaming concats, non-constant selects, narrowing conversions and pattern-bearing conditionals, is opaque, and every LSP inside fans into all bits of the slice (so `y = a & b` still records every bit of `a`,`b` driving every bit of `y`, with bit-precision unaffected by operator expansion below). Falls back to the legacy whole-expression LSP walk when either side is non-integral or the two slicelists disagree on width. See `docs/developer-guide.dox` for full internals documentation.
+
+**Operator expansion** (opt-in, `BuilderOptions::expandOperations` / `--expand-operations`): `OperationLowering` walks an opaque right-hand side and creates one `Operation` node per binary, unary or conditional operator, upstream of the segment's `Assignment`, so a traced path names the operators it passes through instead of one anonymous assignment. It does not add bit precision. A top-level `?:` in an assignment is never expanded, since `BitSliceList` decomposes it into slices first; only a `?:` nested under another operator is. Conditionally evaluated operands (conditional arms, the right operand of `&&`/`||`/`->`) are handed back to the flow analysis so that the definitions reaching each branch are rejoined, which keeps expansion purely additive in nodes but leaves operators nested inside them opaque. See `docs/developer-guide.dox` (`internals-operations`) for details.
+
+### Testing Structure
+
+- `tests/unit/`: Catch2 unit tests; `Test.hpp` provides the `NetlistTest` fixture (compiles inline SV text, runs analysis, exposes `pathExists`/`findPath`/`getDrivers`)
+- `tests/driver/`: Python integration tests via `driver_tests.py` that invoke the `rtl-wiring-inspector` CLI
+- `tests/report/`: Python integration tests via `report_tests.py` that invoke the `rtl-report` CLI
+- `tests/bindings/`: Python binding tests
+- `tests/external/`: tests using SV code from external sources (enabled with `ENABLE_EXTERNAL_TESTS=ON`)
+
+#### RTLMeter external tests (`tests/external/rtlmeter/`)
+
+Fetches the [verilator/rtlmeter](https://github.com/verilator/rtlmeter) suite via CPM and runs `rtl-wiring-inspector` against a curated list of real-world open-source designs (BlackParrot, Caliptra, HummingbirdV2-E203, NVDLA, OpenPiton, OpenTitan, Servant, VeeR-EH1/EH2/EL2, Vortex, XiangShan, XuanTie-C906/C910/E902/E906). Requires `pyyaml` and `tabulate` Python packages. Configure with `-DENABLE_EXTERNAL_TESTS=ON` (not set by any of the standard presets).
+
+Run via ctest (60-minute timeout):
+
+```sh
+ctest --test-dir build/macos-debug -R rtlmeter-tests
+```
+
+Or invoke the Python script directly for more control:
+
+```sh
+# Run a single design
+python tests/external/rtlmeter/rtlmeter_tests.py \
+    build/macos-debug/tools/driver/rtl-wiring-inspector \
+    <rtlmeter-source-dir> \
+    VeeR-EL2
+
+# Run with explicit thread count
+python tests/external/rtlmeter/rtlmeter_tests.py \
+    build/macos-debug/tools/driver/rtl-wiring-inspector \
+    <rtlmeter-source-dir> \
+    --threads 4
+```
+
+After each run a summary table of per-design wall time and peak RSS is printed.
+
+#### Thread-scalability benchmark (`bench-threads`)
+
+The `bench-threads` CMake custom target measures netlist-build throughput at 1, 2, 4, and 8 threads for every design and prints a comparative table, which is useful for evaluating the parallel `AnalysisManager` path:
+
+```sh
+cmake --build build/macos-debug --target bench-threads
+```
+
+Equivalent manual invocation (pass `--threads N1 N2 ...` to choose thread counts):
+
+```sh
+python tests/external/rtlmeter/rtlmeter_tests.py \
+    build/macos-debug/tools/driver/rtl-wiring-inspector \
+    <rtlmeter-source-dir> \
+    --benchmark --threads 1 2 4 8
+```
+
+The benchmark table columns are labelled `1T`, `2T`, `4T`, `8T`; a `FAIL` cell means the tool exited non-zero at that thread count.
+
+### Dependencies (fetched via CPM)
+
+- `slang`: SystemVerilog compiler/AST/analysis (pinned to a specific git hash)
+- `nanobind`: Python bindings (fetched by slang; needs the `nanobind-backend` package at runtime)
+- `fmt`: string formatting
+- `Catch2`: unit testing framework

@@ -1,0 +1,71 @@
+name: Test that Python bindings can build and run through pyproject.toml
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  pyproject:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: clang-release
+            os: ubuntu-latest
+          - preset: clang-sanitize
+            os: ubuntu-latest
+          - preset: gcc-release
+            os: ubuntu-latest
+          - preset: macos-release
+            os: macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Install dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # 1. Properly handle the LLVM Keyring
+        sudo mkdir -p /etc/apt/keyrings
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/llvm.gpg
+
+        # 2. Add LLVM repo using the keyring
+        echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+
+        # 3. Add Toolchain PPA (and update)
+        # We use -y to automate and it performs a refresh automatically
+        sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+
+        # 4. Install with a retry mechanism for network flakiness
+        MAX_RETRIES=3
+        for i in $(seq 1 $MAX_RETRIES); do
+          sudo apt-get install -y valgrind g++-14 g++-11 clang-21 clang-tidy-21 ccache && break || \
+          if [ $i -lt $MAX_RETRIES ]; then echo "Retry $i..."; sleep 5; sudo apt-get update; else exit 1; fi
+        done
+
+    - name: Install ccache (macOS)
+      if: matrix.os == 'macos-latest'
+      run: brew install ccache
+
+    - uses: maxim-lobanov/setup-xcode@v1
+      if: matrix.os == 'macos-latest'
+      with:
+        xcode-version: 'latest'
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version-file: "pyproject.toml"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+
+    - name: Use uv to test Python binding build
+      run: >
+        uv run python -c "import rtl_wiring_inspector; print(rtl_wiring_inspector.__file__)"
