@@ -1012,3 +1012,56 @@ endmodule
   CHECK_FALSE(test.pathExists("m.a", "m.g"));
   CHECK_FALSE(test.pathExists("m.e", "m.c"));
 }
+
+// With bit-aligned resolution off, port nodes stay whole-word and the
+// legacy whole-expression walk must still connect both sides of a
+// concatenated actual.
+TEST_CASE("Concat: concatenated port works without assign-bit resolution",
+          "[Concat]") {
+  auto const *tree = R"(
+module x(input logic [1:0] x,
+         output logic [1:0] y);
+  assign y = x;
+endmodule
+
+module top(input logic a,
+           input logic b,
+           output logic c,
+           output logic d);
+  x u(.x({b, a}), .y({d, c}));
+endmodule
+)";
+  {
+    NetlistTest test(tree, BuilderOptions{.resolveAssignBits = false});
+    CHECK(test.pathExists("top.a", "top.c"));
+    CHECK(test.pathExists("top.b", "top.d"));
+  }
+  {
+    NetlistTest test(tree, BuilderOptions{.resolveAssignBits = false,
+                                          .propCutsAcrossPorts = false});
+    CHECK(test.pathExists("top.a", "top.c"));
+    CHECK(test.pathExists("top.b", "top.d"));
+  }
+}
+
+// A write that covers a whole output port still has to reach every port
+// node when cut hints from a concatenated actual have split it.
+TEST_CASE("Concat: whole-range write fans out to split output port nodes",
+          "[Concat]") {
+  auto const *tree = R"(
+module x(input logic [1:0] x,
+         output logic [1:0] y);
+  assign y = x & 2'b11;
+endmodule
+
+module top(input logic a,
+           input logic b,
+           output logic c,
+           output logic d);
+  x u(.x({b, a}), .y({d, c}));
+endmodule
+)";
+  NetlistTest test(tree, BuilderOptions{.resolveAssignBits = true});
+  CHECK(test.pathExists("top.a", "top.c"));
+  CHECK(test.pathExists("top.b", "top.d"));
+}

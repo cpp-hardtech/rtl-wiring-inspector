@@ -28,18 +28,37 @@ void DataFlowAnalysis::addNonBlockingLvalue(ast::ValueSymbol const &symbol,
                                             NetlistNode *node) {
   DEBUG_PRINT("Adding pending non-blocking L-value: {}{}\n", symbol.name,
               toString(bounds));
-  pendingLValues.emplace_back(&symbol, &lsp, bounds, node);
+  if (node == nullptr) {
+    return;
+  }
+  // A non-blocking assignment only takes effect at the end of the block, so
+  // record it against the path's pending definitions rather than the map
+  // reads consult. Replacing the pending definition for the same range
+  // keeps last-write-wins along one path; control-flow joins merge the
+  // pending maps of mutually exclusive paths.
+  valueTracker.addDrivers(getState().pendingNBAs, symbol, bounds,
+                          {DriverInfo(node, &lsp)}, DriverUpdate::Replace);
 }
 
 void DataFlowAnalysis::processNonBlockingLvalues() {
-  for (auto &pending : pendingLValues) {
-    DEBUG_PRINT("Processing pending non-blocking L-value: {}{}\n",
-                pending.symbol->name, toString(pending.bounds));
-    valueTracker.addDrivers(
-        getState().valueDrivers, *pending.symbol, pending.bounds,
-        {DriverInfo(pending.node, pending.lsp)}, DriverUpdate::Replace);
+  auto &state = getState();
+
+  // Fold the pending definitions into the read-visible driver map. The
+  // pending map already resolved last-write-wins per path and kept the
+  // alternatives from joined branches, so this is a union: definitions
+  // contributed by blocking assignments are real dependencies too.
+  for (size_t i = 0; i < state.pendingNBAs.size(); i++) {
+    auto const *symbol = valueTracker.getSymbol(static_cast<uint32_t>(i));
+    for (auto it = state.pendingNBAs[i].begin();
+         it != state.pendingNBAs[i].end(); it++) {
+      DEBUG_PRINT("Processing pending non-blocking L-value: {}{}\n",
+                  symbol->name, toString(it.bounds()));
+      valueTracker.addDrivers(state.valueDrivers, *symbol, it.bounds(),
+                              state.pendingNBAs[i].getDriverList(*it),
+                              DriverUpdate::Merge);
+    }
   }
-  pendingLValues.clear();
+  state.pendingNBAs.clear();
 }
 
 void DataFlowAnalysis::handleRvalue(ast::ValueSymbol const &symbol,
@@ -466,6 +485,19 @@ auto DataFlowAnalysis::mergeStates(AnalysisState &result,
     }
   }
 
+  // Non-blocking definitions follow the same merge rule: every branch that
+  // could execute contributes its writes.
+  for (auto i = 0; i < other.pendingNBAs.size(); i++) {
+    auto const *symbol = valueTracker.getSymbol(i);
+    for (auto it = other.pendingNBAs[i].begin();
+         it != other.pendingNBAs[i].end(); it++) {
+      auto bounds = it.bounds();
+      auto const &driverList = other.pendingNBAs[i].getDriverList(*it);
+      valueTracker.addDrivers(result.pendingNBAs, *symbol, bounds, driverList,
+                              DriverUpdate::Merge);
+    }
+  }
+
   // Combine the node pointers of two paths. A node both paths reached is kept
   // when keepShared; distinct nodes need a Merge to stand for the branch.
   auto mergeNodes = [&](NetlistNode *a, NetlistNode *b,
@@ -527,6 +559,11 @@ auto DataFlowAnalysis::copyState(AnalysisState const &source) -> AnalysisState {
   for (const auto &definition : source.valueDrivers) {
     result.valueDrivers.emplace_back(
         definition.clone(valueTracker.getAllocator()));
+  }
+  result.pendingNBAs.reserve(source.pendingNBAs.size());
+  for (const auto &definitions : source.pendingNBAs) {
+    result.pendingNBAs.emplace_back(
+        definitions.clone(valueTracker.getAllocator()));
   }
   return result;
 }

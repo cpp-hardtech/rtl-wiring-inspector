@@ -96,6 +96,7 @@ endmodule
   N5 -> N6
   N5 -> N8
   N6 -> N9
+  N6 -> N10 [label="foo_q[0]"]
   N7 -> N6
   N8 -> N9
   N8 -> N10 [label="foo_q[0]"]

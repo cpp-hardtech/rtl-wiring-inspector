@@ -308,30 +308,36 @@ void NetlistBuilder::hookupOutputPort(ast::ValueSymbol const &symbol,
 
     // Lookup the port node in the graph. Safe to do eagerly here, unlike
     // the modport lookup above (see VariableTracker::lookup).
-    //
-    // The interval map may have split a single contiguous driver range into
-    // smaller sub-intervals (because another driver overwrote/merged part
-    // of it), so an exact-bounds lookup can miss. Fall back to any port
-    // node for this port whose bounds contain the sub-interval.
     const ast::PortSymbol *portSymbol = portBackRef->port;
-    NetlistNode *portNode = getVariable(*portSymbol, bounds);
-    if (portNode == nullptr) {
-      for (auto *candidate : getVariable(*portSymbol)) {
-        auto candidateBounds = candidate->getBounds();
-        if (candidateBounds.has_value() &&
-            ConstantRange(*candidateBounds).contains(bounds)) {
-          portNode = candidate;
-          break;
-        }
-      }
-    }
-    if (portNode != nullptr) {
+    auto symRef = toSymbolRef(symbol);
 
-      // Connect the drivers to the port node(s).
-      auto symRef = toSymbolRef(symbol);
+    // Fast path: a single port node covers exactly this range.
+    if (auto *portNode = getVariable(*portSymbol, bounds)) {
       for (auto const &driver : driverList) {
         if (driver.node != nullptr) {
           addDependency(*driver.node, *portNode, symRef, bounds);
+        }
+      }
+      return;
+    }
+
+    // The port's range can be split into several nodes, either because cut
+    // hints from a concatenated actual refined it or because the interval
+    // map split a contiguous driver range. A write that covers more than
+    // one such node has to fan out to each, annotated with the overlap so
+    // the edge stays bit-accurate.
+    for (auto *portNode : getVariable(*portSymbol)) {
+      auto portBounds = portNode->getBounds();
+      if (!portBounds) {
+        continue;
+      }
+      auto overlap = bounds.intersection(*portBounds);
+      if (!overlap) {
+        continue;
+      }
+      for (auto const &driver : driverList) {
+        if (driver.node != nullptr) {
+          addDependency(*driver.node, *portNode, symRef, *overlap);
         }
       }
     }

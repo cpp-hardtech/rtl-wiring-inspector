@@ -2,7 +2,6 @@
 
 #include "DriverMap.hpp"
 #include "IntervalMapUtils.hpp"
-#include "PendingRValue.hpp"
 #include "ValueTracker.hpp"
 
 #include "netlist/Debug.hpp"
@@ -28,6 +27,14 @@ struct AnalysisState {
   // Each tracked variable has its definitions intervals stored here.
   ValueDrivers valueDrivers;
 
+  // Definitions contributed by non-blocking assignments along the paths
+  // leading to this point. They are kept separate from `valueDrivers`
+  // until the block finishes, because a non-blocking assignment does not
+  // update the value seen by later reads in the same block. Carrying them
+  // in the state lets mutually exclusive branches all contribute while a
+  // later write on the same path replaces an earlier one.
+  ValueDrivers pendingNBAs;
+
   // The current control flow node in the graph.
   NetlistNode *node{nullptr};
 
@@ -40,17 +47,6 @@ struct AnalysisState {
   AnalysisState() = default;
   AnalysisState(AnalysisState &&other) = default;
   auto operator=(AnalysisState &&other) -> AnalysisState & = default;
-};
-
-struct PendingLvalue {
-  not_null<const ast::ValueSymbol *> symbol;
-  const ast::Expression *lsp;
-  DriverBitRange bounds;
-  NetlistNode *node{nullptr};
-
-  PendingLvalue(const ast::ValueSymbol *symbol, const ast::Expression *lsp,
-                DriverBitRange bounds, NetlistNode *node)
-      : symbol(symbol), lsp(lsp), bounds(bounds), node(node) {}
 };
 
 /// A data flow analysis used as part of the netlist graph construction.
@@ -81,10 +77,6 @@ struct DataFlowAnalysis
   // port node that is created by the DFA caller to reference port connection
   // lvalues against.
   NetlistNode *externalNode;
-
-  // Pending L-values from non-blocking assignments that need to be processed at
-  // the end of the procedural block.
-  std::vector<PendingRvalue> pendingLValues;
 
   // Allocator reused across every handleRvalue() invocation within the DFA.
   BumpAllocator rvalueAllocator;

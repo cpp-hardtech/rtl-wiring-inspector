@@ -120,9 +120,13 @@ void PortConnectionHandler::materializePortNodes(
       builder.canonicalResolver.getCanonicalValueSymbol(valueSymbol);
   auto drivers = builder.analysisManager.getDrivers(driverQuerySymbol);
 
-  // No hints (or feature off) ⇒ one node per driver.
+  // No hints (or feature off) ⇒ one node per driver. Cut points only
+  // refine the bit-aligned resolution path; the legacy whole-expression
+  // walk cannot address the split nodes it produces, so leave the port
+  // node whole when bit resolution is disabled.
   std::vector<uint64_t> const *hints = nullptr;
-  if (builder.options.propCutsAcrossPorts) {
+  if (builder.options.propCutsAcrossPorts &&
+      builder.options.resolveAssignBits) {
     hints = cutRegistry.cutsFor(valueSymbol);
   }
 
