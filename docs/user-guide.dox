@@ -49,6 +49,9 @@ the full option list.
 - @c -h, @c --help: display available options.
 - @c --version: print version information and exit.
 - @c --no-colours: disable coloured output.
+- @c --colour: force coloured output even when stdout is not a terminal.
+  Colours are on by default only when stdout is an interactive terminal;
+  @c --no-colours takes precedence over @c --colour.
 - @c -q, @c --quiet: suppress non-essential output.
 - @c -d, @c --debug: enable debug logging (debug builds only).
 - @c -j, @c --threads @c \<N\>: set the number of threads (0 = hardware
@@ -100,6 +103,9 @@ When the design has been compiled with the slang AST available, source locations
 are available and the output includes annotated source lines; otherwise after
 loading a serialised netlist, a plain @c file:line:col format is used.
 
+A single name can resolve to several split nodes, so the search tries every
+combination of same-named start and end nodes and reports the first path found.
+
 Either endpoint may be given on its own. @c --from @c \<name\> alone reports the
 combinational fan-out cone from the node (equivalent to @c --fan-out), and
 @c --to @c \<name\> alone reports the combinational fan-in cone to it
@@ -115,8 +121,10 @@ node.
 @c --sensitivity @c \<name\>: report the clocks and resets gating a named
 node. For a register the node's own clocking edges are listed; for a
 combinational node the union of the clocking edges over every register in
-its combinational fan-out. Each entry shows the source signal, its edge
-kind, and source location.
+its combinational fan-out. When a name resolves to both a register State node
+and a same-named port, the register's own edges are used, so the clocks of
+the logic it feeds do not leak into the answer. Each entry shows the source
+signal, its edge kind, and source location.
 
 @c --constant-drivers @c \<name\>: report the constant values driving a
 named node when its combinational fan-in bottoms out only at literals
@@ -131,8 +139,17 @@ optional bit-range suffix narrows and clips the query, e.g.
 @c m.sig[3:0] or @c m.sig[2]; without one the whole signal is reported.
 This exposes the graph's bit-level connectivity directly.
 
+Only write edges count as drivers, so reading a signal does not make it look
+self-driven. A name can be a declared signal, a register, an output port, or an
+internal wire/reg that has no node of its own: internal signals are resolved
+from the symbols annotated on their driving edges. A hierarchical input port
+reports the actual wired to it. A name that is present in the design but has
+no known driver produces an empty table; only a name absent from the design
+is an error.
+
 @c --find @c \<pattern\>: find named nodes matching a glob pattern.
-See @ref glob-syntax for the full pattern syntax.
+A signal split across several nodes is listed once. See @ref glob-syntax
+for the full pattern syntax.
 
 @c --find-regex @c \<pattern\>: find named nodes matching a regex pattern.
 
@@ -172,7 +189,9 @@ rtl-wiring-inspector design.sv --report-registers --format json -o registers.jso
 @c --report-registers: list all registers (@c State nodes) in the design.
 A State node is created for any variable that is assigned inside a clocked
 procedural block (@c always_ff or an @c always block with an edge-sensitive
-event list). Each entry shows the hierarchical path and source location.
+event list). Each entry shows the hierarchical path and source location. A
+register split into several State nodes by bit-aligned resolution is listed
+once.
 
 @c --comb-loops: detect and report combinational loops. Reports cycles in
 the graph that consist entirely of combinational (non-clocked) edges. Each

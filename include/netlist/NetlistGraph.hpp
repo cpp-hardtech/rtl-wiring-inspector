@@ -58,9 +58,28 @@ public:
 
   /// Lookup a node in the graph by its hierarchical name.
   ///
+  /// When the signal is split across several nodes (see lookupAll), this
+  /// returns the one with the lowest node ID.
+  ///
   /// @param name The hierarchical name of the node.
   /// @return A pointer to the node if found, or nullptr if not found.
   [[nodiscard]] auto lookup(std::string_view name) const -> NetlistNode *;
+
+  /// Lookup every node in the graph with exactly the hierarchical @p name.
+  ///
+  /// Bit-aligned resolution can split one signal into several nodes, each
+  /// covering a different bit range, so a whole-signal query has to consider
+  /// them together. Nodes are ordered by ascending ID, which is stable for
+  /// one graph but may differ between builds.
+  [[nodiscard]] auto lookupAll(std::string_view name) const
+      -> std::vector<NetlistNode *>;
+
+  /// Return true if @p name identifies a symbol in the graph.
+  ///
+  /// A symbol is present when a node carries the path or when an edge is
+  /// annotated with it. This distinguishes a real signal that has no known
+  /// driver from a name that is absent from the design.
+  [[nodiscard]] auto hasSymbol(std::string_view name) const -> bool;
 
   /// Lookup nodes by hierarchical name and bit range.
   ///
@@ -73,8 +92,12 @@ public:
   /// @p name over the bit range @p bounds.
   ///
   /// A driver is any node that is the source of an edge annotated with a
-  /// matching symbol reference whose bounds overlap @p bounds. Each driver is
-  /// reported at most once.
+  /// matching symbol reference whose bounds overlap @p bounds. For a symbol
+  /// with a storage node (a Port, State, or Variable), write edges (those
+  /// targeting a storage node) are the drivers, and a read edge emitted by a
+  /// node that also writes the signal is not repeated. An internal symbol
+  /// without a storage node reports the node that writes each range. Each
+  /// driver is reported at most once.
   [[nodiscard]] auto getDrivers(std::string_view name,
                                 DriverBitRange bounds) const
       -> std::vector<NetlistNode *>;
@@ -100,6 +123,12 @@ public:
   /// sub-range of @p name that the driver actually covers, so callers can
   /// report bit-level provenance. Entries are sorted by ascending bit
   /// position and deduplicated on (bounds, driver).
+  ///
+  /// Driver edges are selected as in getDrivers. In addition, an edge into a
+  /// same-named Port node that is annotated with another symbol (the actual
+  /// of a port connection) reports that actual as the driver over the port
+  /// node's own bit range, so `--drivers top.u.x` shows the source wired to
+  /// the hierarchical input port.
   [[nodiscard]] auto getBitDrivers(std::string_view name,
                                    DriverBitRange bounds) const
       -> std::vector<BitDriver>;
@@ -218,6 +247,11 @@ private:
   mutable bool indexBuilt = false;
   mutable std::unordered_map<std::string, std::vector<NetlistNode *>> nodeIndex;
   void buildIndex() const;
+
+  /// Collect the driver edges of @p name clipped to @p bounds.
+  [[nodiscard]] auto getDriverEntries(std::string_view name,
+                                      DriverBitRange bounds) const
+      -> std::vector<BitDriver>;
 };
 
 } // namespace slang::netlist

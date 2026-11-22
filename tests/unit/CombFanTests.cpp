@@ -116,3 +116,33 @@ TEST_CASE("Fan-in from a single node", "[CombFan]") {
   CHECK(fanIn.size() == 1);
   CHECK(fanIn[0] == start);
 }
+
+TEST_CASE("Every split node contributes to the combined fan-out",
+          "[CombFan]") {
+  auto const &tree = R"(
+module sub(input logic [1:0] x, output logic [1:0] y);
+  assign y[0] = 1'b0;
+  assign y[1] = x[1];
+endmodule
+module top(input logic a, input logic b, output logic c, output logic d);
+  sub u(.x({b, a}), .y({d, c}));
+endmodule
+)";
+  NetlistTest test(tree);
+  auto nodes = test.graph.lookupAll("top.u.x");
+  REQUIRE(nodes.size() == 2);
+  std::set<std::string> names;
+  for (auto *node : nodes) {
+    for (auto *reachable : test.graph.getCombFanOut(*node)) {
+      auto path = reachable->getHierarchicalPath();
+      if (path.has_value()) {
+        names.insert(std::string(*path));
+      }
+    }
+  }
+  // Only the upper bit of x reaches the output; the union over both nodes
+  // has to include it.
+  CHECK(names.contains("top.u.x"));
+  CHECK(names.contains("top.d"));
+  CHECK_FALSE(names.contains("top.c"));
+}

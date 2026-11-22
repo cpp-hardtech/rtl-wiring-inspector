@@ -24,11 +24,15 @@
 #include "fmt/color.h"
 #include "fmt/format.h"
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <charconv>
 #include <chrono>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
+#include <system_error>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -77,6 +81,10 @@ void reportNodeDiag(NetlistDiagnostics &diagnostics, NetlistNode const &node) {
       diagnostics.issue(diagnostic);
     } else if (port.isOutput()) {
       Diagnostic diagnostic(diag::OutputPort, srcLoc);
+      diagnostic << port.name;
+      diagnostics.issue(diagnostic);
+    } else if (port.direction == ast::ArgumentDirection::InOut) {
+      Diagnostic diagnostic(diag::InOutPort, srcLoc);
       diagnostic << port.name;
       diagnostics.issue(diagnostic);
     } else {
@@ -136,6 +144,8 @@ void reportNodeText(netlist::FormatBuffer &buffer, FileTable const &fileTable,
       buffer.format("{}: note: input port {}\n", loc, port.name);
     } else if (port.isOutput()) {
       buffer.format("{}: note: output port {}\n", loc, port.name);
+    } else if (port.direction == ast::ArgumentDirection::InOut) {
+      buffer.format("{}: note: inout port {}\n", loc, port.name);
     } else {
       SLANG_UNREACHABLE;
     }
@@ -246,8 +256,13 @@ auto main(int argc, char **argv) -> int {
 
   std::optional<bool> noColours;
   driver.cmdLine.add("--no-colours", noColours,
-                     "Disable colored output (default is enabled on terminals "
-                     "that support it)");
+                     "Disable colored output (default is enabled only when "
+                     "stdout is a terminal that supports it)");
+
+  std::optional<bool> colour;
+  driver.cmdLine.add("--colour", colour,
+                     "Force colored output even when stdout is not a "
+                     "terminal (--no-colours still takes precedence)");
 
   std::optional<bool> quiet;
   driver.cmdLine.add("-q,--quiet", quiet, "Suppress non-essential output");
@@ -259,7 +274,7 @@ auto main(int argc, char **argv) -> int {
 
   std::optional<bool> statsJson;
   driver.cmdLine.add("--stats-json", statsJson,
-                     "Print execution statistics as JSON to stdout");
+                     "Print execution statistics as JSON to stderr");
 
   std::optional<bool> debug;
   driver.cmdLine.add("-d,--debug", debug, "Output debugging information");
@@ -460,9 +475,43 @@ auto main(int argc, char **argv) -> int {
     }
   }
 
+  // Colours are enabled only when stdout is an interactive terminal unless
+  // an explicit flag says otherwise.
+  bool useColours = false;
+  if (noColours == true) {
+    useColours = false;
+  } else if (colour == true) {
+    useColours = true;
+  } else {
+    useColours = OS::fileSupportsColors(stdout);
+  }
+
+  // Write file contents, turning a stream failure into an error that names
+  // the target instead of leaking an iostream failure message.
+  auto writeFile = [](std::string const &path, std::string_view content) {
+    if (path == "-") {
+      OS::print(content);
+      return;
+    }
+    errno = 0;
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file.is_open()) {
+      auto error = std::error_code(errno, std::generic_category());
+      SLANG_THROW(std::runtime_error(
+          fmt::format("could not write file '{}': {}", path,
+                      error.message())));
+    }
+    file.write(content.data(), static_cast<std::streamsize>(content.size()));
+    file.close();
+    if (file.fail()) {
+      SLANG_THROW(std::runtime_error(
+          fmt::format("could not write file '{}': write failed", path)));
+    }
+  };
+
   auto writeOutput = [&](std::string_view content) {
     if (outputFile && *outputFile != "-") {
-      OS::writeFile(*outputFile, content);
+      writeFile(*outputFile, content);
     } else {
       OS::print(content);
     }
@@ -806,7 +855,7 @@ auto main(int argc, char **argv) -> int {
                   graph.numEdges());
 
       diagnostics =
-          std::make_unique<NetlistDiagnostics>(*compilation, !noColours);
+          std::make_unique<NetlistDiagnostics>(*compilation, useColours);
     }
 
     // --- Commands that work on both built and loaded netlists ---
@@ -814,7 +863,7 @@ auto main(int argc, char **argv) -> int {
     // Write the netlist out.
     if (saveNetlistFile) {
       auto json = NetlistSerializer::serialize(graph);
-      OS::writeFile(*saveNetlistFile, json);
+      writeFile(*saveNetlistFile, json);
       printStats();
       return 0;
     }
@@ -825,15 +874,109 @@ auto main(int argc, char **argv) -> int {
     // and scoped --netlist-dot) treats them uniformly. When both endpoints are
     // given, path-finding takes over instead; an explicit --fan-out/--fan-in
     // always wins.
-    if (fromPointName && !toPointName && !fanOutName) {
+    if (fromPointName && !toPointName && !fanOutName && !fanInName) {
       fanOutName = fromPointName;
-    } else if (toPointName && !fromPointName && !fanInName) {
+    } else if (toPointName && !fromPointName && !fanInName && !fanOutName) {
       fanInName = toPointName;
     }
+
+    // Collect the combinational fan-out over every node with the given name.
+    auto collectFanOut = [&](std::string const &name)
+        -> std::vector<NetlistNode *> {
+      auto startNodes = graph.lookupAll(name);
+      if (startNodes.empty()) {
+        SLANG_THROW(
+            std::runtime_error(fmt::format("could not find node: {}", name)));
+      }
+      std::unordered_set<NetlistNode *> seen;
+      std::vector<NetlistNode *> result;
+      for (auto *node : startNodes) {
+        if (seen.insert(node).second) {
+          result.push_back(node);
+        }
+        for (auto *n : graph.getCombFanOut(*node)) {
+          if (seen.insert(n).second) {
+            result.push_back(n);
+          }
+        }
+      }
+      return result;
+    };
+
+    // Collect the combinational fan-in over every node with the given name.
+    auto collectFanIn = [&](std::string const &name)
+        -> std::vector<NetlistNode *> {
+      auto endNodes = graph.lookupAll(name);
+      if (endNodes.empty()) {
+        SLANG_THROW(
+            std::runtime_error(fmt::format("could not find node: {}", name)));
+      }
+      std::unordered_set<NetlistNode *> seen;
+      std::vector<NetlistNode *> result;
+      for (auto *node : endNodes) {
+        if (seen.insert(node).second) {
+          result.push_back(node);
+        }
+        for (auto *n : graph.getCombFanIn(*node)) {
+          if (seen.insert(n).second) {
+            result.push_back(n);
+          }
+        }
+      }
+      return result;
+    };
+
+    // Find up to one path for every start/end node pair with the given names.
+    auto collectPaths = [&](std::string const &fromName,
+                            std::string const &toName)
+        -> std::vector<NetlistPath> {
+      auto fromNodes = graph.lookupAll(fromName);
+      if (fromNodes.empty()) {
+        SLANG_THROW(std::runtime_error(
+            fmt::format("could not find start point: {}", fromName)));
+      }
+      auto toNodes = graph.lookupAll(toName);
+      if (toNodes.empty()) {
+        SLANG_THROW(std::runtime_error(
+            fmt::format("could not find finish point: {}", toName)));
+      }
+      std::vector<NetlistPath> paths;
+      PathFinder pathFinder;
+      for (auto *from : fromNodes) {
+        for (auto *to : toNodes) {
+          auto path = pathFinder.find(*from, *to);
+          if (!path.empty()) {
+            paths.push_back(std::move(path));
+          }
+        }
+      }
+      return paths;
+    };
+
+    // Emit a node-list table for a fan cone, listing each signal once even
+    // when it is split across several nodes.
+    auto emitConeTable = [&](std::vector<NetlistNode *> const &nodes) {
+      auto header = Utilities::Row{"Name", "Location"};
+      auto table = Utilities::Table{};
+      std::unordered_set<std::string> reported;
+      for (auto const *n : nodes) {
+        auto path = n->getHierarchicalPath();
+        if (path.has_value() && passesFilters(*path)) {
+          auto loc = n->getLocation();
+          auto location = loc ? loc->toString(graph.fileTable) : std::string();
+          if (!reported.insert(std::string(*path) + "\n" + location).second) {
+            continue;
+          }
+          table.push_back(Utilities::Row{std::string(*path), location});
+        }
+      }
+      emitTable(header, table);
+    };
 
     if (reportRegisters) {
       auto header = Utilities::Row{"Name", "Location"};
       auto table = Utilities::Table{};
+      std::unordered_set<std::string> reported;
 
       for (auto const &node : graph.filterNodes(NodeKind::State)) {
         auto const &stateNode = node->as<State>();
@@ -841,6 +984,11 @@ auto main(int argc, char **argv) -> int {
           continue;
         }
         auto loc = stateNode.location.toString(graph.fileTable);
+        // Bit-aligned resolution can split one register into several State
+        // nodes; report the register once.
+        if (!reported.insert(stateNode.hierarchicalPath + "\n" + loc).second) {
+          continue;
+        }
         table.push_back(Utilities::Row{stateNode.hierarchicalPath, loc});
       }
 
@@ -868,50 +1016,38 @@ auto main(int argc, char **argv) -> int {
 
     // Output a DOT file of the netlist. When combined with a fan-out, fan-in
     // or path selector, render only that induced subgraph instead of the
-    // whole netlist.
+    // whole netlist. A signal name can resolve to several nodes, so a cone
+    // covers every one of them and a path scope is the union of every path
+    // found between same-named endpoints.
     if (netlistDotFile) {
-      auto requireNode = [&](std::string const &name) -> NetlistNode * {
-        auto *node = graph.lookup(name);
-        if (node == nullptr) {
-          SLANG_THROW(
-              std::runtime_error(fmt::format("could not find node: {}", name)));
-        }
-        return node;
-      };
-
       netlist::FormatBuffer buffer;
       if (fanOutName || fanInName || (fromPointName && toPointName)) {
         std::unordered_set<NetlistNode const *> scope;
         if (fanOutName) {
-          auto *node = requireNode(*fanOutName);
-          scope.insert(node);
-          for (auto *n : graph.getCombFanOut(*node)) {
-            scope.insert(n);
+          for (auto *node : collectFanOut(*fanOutName)) {
+            scope.insert(node);
           }
         } else if (fanInName) {
-          auto *node = requireNode(*fanInName);
-          scope.insert(node);
-          for (auto *n : graph.getCombFanIn(*node)) {
-            scope.insert(n);
+          for (auto *node : collectFanIn(*fanInName)) {
+            scope.insert(node);
           }
         } else {
-          auto *fromPoint = requireNode(*fromPointName);
-          auto *toPoint = requireNode(*toPointName);
-          PathFinder pathFinder;
-          auto path = pathFinder.find(*fromPoint, *toPoint);
-          if (path.empty()) {
+          auto paths = collectPaths(*fromPointName, *toPointName);
+          if (paths.empty()) {
             SLANG_THROW(std::runtime_error(fmt::format(
                 "no path between {} and {}", *fromPointName, *toPointName)));
           }
-          for (auto const *n : path) {
-            scope.insert(n);
+          for (auto const &path : paths) {
+            for (auto const *node : path) {
+              scope.insert(node);
+            }
           }
         }
         NetlistDot::render(graph, buffer, scope);
       } else {
         NetlistDot::render(graph, buffer);
       }
-      OS::writeFile(*netlistDotFile, buffer.str());
+      writeFile(*netlistDotFile, buffer.str());
       printStats();
       return 0;
     }
@@ -923,85 +1059,77 @@ auto main(int argc, char **argv) -> int {
                        : graph.findNodesRegex(*findRegexPattern);
       auto header = Utilities::Row{"Name", "Location"};
       auto table = Utilities::Table{};
+      // A signal split across several nodes by bit-aligned resolution would
+      // otherwise be listed once per node with the same name and location.
+      std::unordered_set<std::string> reported;
       for (auto const *node : nodes) {
         auto path = node->getHierarchicalPath();
         if (!passesFilters(path.value_or(""))) {
           continue;
         }
+        auto name = std::string(path.value_or("(unnamed)"));
+        if (!reported.insert(name).second) {
+          continue;
+        }
         auto loc = node->getLocation();
-        table.push_back(Utilities::Row{std::string(path.value_or("(unnamed)")),
-                                       loc ? loc->toString(graph.fileTable)
-                                           : std::string()});
+        auto location = loc ? loc->toString(graph.fileTable) : std::string();
+        table.push_back(Utilities::Row{name, location});
       }
       emitTable(header, table);
       printStats();
       return 0;
     }
 
-    // Report combinational fan-out from a named node.
+    // Report combinational fan-out from a named node. Every node sharing the
+    // name contributes its cone; the union is reported once per node.
     if (fanOutName.has_value()) {
-      auto *node = graph.lookup(*fanOutName);
-      if (node == nullptr) {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("could not find node: {}", *fanOutName)));
-      }
-      auto fanOut = graph.getCombFanOut(*node);
-      auto header = Utilities::Row{"Name", "Location"};
-      auto table = Utilities::Table{};
-      for (auto const *n : fanOut) {
-        auto path = n->getHierarchicalPath();
-        if (path.has_value() && passesFilters(*path)) {
-          auto loc = n->getLocation();
-          table.push_back(Utilities::Row{std::string(*path),
-                                         loc ? loc->toString(graph.fileTable)
-                                             : std::string()});
-        }
-      }
-      emitTable(header, table);
+      emitConeTable(collectFanOut(*fanOutName));
       printStats();
       return 0;
     }
 
     // Report combinational fan-in to a named node.
     if (fanInName.has_value()) {
-      auto *node = graph.lookup(*fanInName);
-      if (node == nullptr) {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("could not find node: {}", *fanInName)));
-      }
-      auto fanIn = graph.getCombFanIn(*node);
-      auto header = Utilities::Row{"Name", "Location"};
-      auto table = Utilities::Table{};
-      for (auto const *n : fanIn) {
-        auto path = n->getHierarchicalPath();
-        if (path.has_value() && passesFilters(*path)) {
-          auto loc = n->getLocation();
-          table.push_back(Utilities::Row{std::string(*path),
-                                         loc ? loc->toString(graph.fileTable)
-                                             : std::string()});
-        }
-      }
-      emitTable(header, table);
+      emitConeTable(collectFanIn(*fanInName));
       printStats();
       return 0;
     }
 
     // Report the clocks/resets gating a named node. A single hierarchical
     // name can resolve to several nodes (e.g. a register's State node and
-    // its same-named output Port), so aggregate sensitivity across all of
-    // them and deduplicate.
+    // its same-named output Port), so aggregate sensitivity per symbol. When
+    // a symbol has a State node, only its own clocking edges count; the
+    // same-named Port would otherwise pick up the clocks of the registers it
+    // feeds. Symbols without a State node fall back to the fan-out union.
     if (sensitivityName.has_value()) {
       auto nodes = graph.findNodes(*sensitivityName);
       if (nodes.empty()) {
         SLANG_THROW(std::runtime_error(
             fmt::format("could not find node: {}", *sensitivityName)));
       }
-      std::vector<NetlistGraph::SensitivitySource> sensitivity;
+      std::ranges::sort(nodes, {}, [](NetlistNode *node) { return node->ID; });
+
+      std::map<std::string, std::vector<NetlistNode *>> nodesByPath;
       for (auto *node : nodes) {
-        for (auto const &src : graph.getSensitivity(*node)) {
-          if (std::find(sensitivity.begin(), sensitivity.end(), src) ==
-              sensitivity.end()) {
-            sensitivity.push_back(src);
+        nodesByPath[std::string(node->getHierarchicalPath().value_or(""))]
+            .push_back(node);
+      }
+
+      std::vector<NetlistGraph::SensitivitySource> sensitivity;
+      for (auto &[path, group] : nodesByPath) {
+        bool hasState =
+            std::any_of(group.begin(), group.end(), [](NetlistNode *node) {
+              return node->kind == NodeKind::State;
+            });
+        for (auto *node : group) {
+          if (hasState && node->kind != NodeKind::State) {
+            continue;
+          }
+          for (auto const &src : graph.getSensitivity(*node)) {
+            if (std::find(sensitivity.begin(), sensitivity.end(), src) ==
+                sensitivity.end()) {
+              sensitivity.push_back(src);
+            }
           }
         }
       }
@@ -1048,7 +1176,10 @@ auto main(int argc, char **argv) -> int {
     // Report, per bit, the nodes driving a named signal.
     if (driversName.has_value()) {
       auto [path, range] = parseNameAndRange(*driversName);
-      if (graph.lookup(path) == nullptr) {
+      // A signal may exist only as an edge annotation, with no node of its
+      // own (an internal wire or reg); report its drivers, which is the empty
+      // table when it has none. Only a name that is absent is an error.
+      if (!graph.hasSymbol(path)) {
         SLANG_THROW(
             std::runtime_error(fmt::format("could not find node: {}", path)));
       }
@@ -1068,36 +1199,24 @@ auto main(int argc, char **argv) -> int {
       return 0;
     }
 
-    // Find a point-to-point path in the netlist.
+    // Find a point-to-point path in the netlist. A single name can resolve
+    // to several split nodes, so search every start/end pair and report the
+    // first path found.
     if (fromPointName.has_value() && toPointName.has_value()) {
-      auto *fromPoint = graph.lookup(*fromPointName);
-      if (fromPoint == nullptr) {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("could not find start point: {}", *fromPointName)));
-      }
-      auto *toPoint = graph.lookup(*toPointName);
-      if (toPoint == nullptr) {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("could not find finish point: {}", *toPointName)));
-      }
-
       DEBUG_PRINT("Searching for path between: {} and {}\n", *fromPointName,
                   *toPointName);
 
-      // Search for the path.
-      PathFinder pathFinder;
-      auto path = pathFinder.find(*fromPoint, *toPoint);
-
-      if (!path.empty()) {
-        auto result = reportPath(graph.fileTable, diagnostics.get(), path);
-        OS::print(fmt::format("{}\n", result));
-        printStats();
-        return 0;
+      auto paths = collectPaths(*fromPointName, *toPointName);
+      if (paths.empty()) {
+        SLANG_THROW(std::runtime_error(fmt::format(
+            "no path between {} and {}", *fromPointName, *toPointName)));
       }
 
-      // No path found.
-      SLANG_THROW(std::runtime_error(fmt::format(
-          "no path between {} and {}", *fromPointName, *toPointName)));
+      auto result =
+          reportPath(graph.fileTable, diagnostics.get(), paths.front());
+      OS::print(fmt::format("{}\n", result));
+      printStats();
+      return 0;
     }
 
     // If we reach here, no action was specified.

@@ -12,7 +12,8 @@
   X(Assignment, 3, "assignment")                                               \
   X(Conditional, 4, "conditional statement")                                   \
   X(Case, 5, "case statement")                                                 \
-  X(Operation, 6, "operation {}")
+  X(Operation, 6, "operation {}")                                              \
+  X(InOutPort, 7, "inout port {}")
 
 namespace slang::diag {
 
