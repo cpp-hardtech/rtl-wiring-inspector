@@ -366,11 +366,67 @@ drivers = graph.get_drivers(node)
 # Combinational fan-out / fan-in (stops at State nodes).
 fan_out = graph.get_comb_fan_out(node)
 fan_in  = graph.get_comb_fan_in(node)
+
+# Per-bit drivers keep one entry per contributing edge, clipped to the
+# sub-range of the queried symbol that the driver covers.
+for bit_driver in graph.get_bit_drivers("m.y"):
+    lower, upper = bit_driver.bounds
+    print(lower, upper, bit_driver.driver.kind)
+
+# Restrict the query to a bit range.
+bit_drivers = graph.get_bit_drivers("m.y", 3, 5)
+
+# Traverse the edges attached to a node. Each edge exposes its source and
+# target nodes, the driven symbol, and the clock sensitivity.
+for edge in node.out_edges:
+    print(edge.source.ID, edge.target.ID, edge.edge_kind, edge.symbol_path)
+for edge in node.in_edges:
+    print(edge.source.ID, edge.target.ID, edge.bounds, edge.disabled)
 @endcode
 
-@c NetlistGraph::getBitDrivers (per-bit, non-deduplicated drivers) and the
-black-box coverage API (@c getBlackBoxPaths / @c getBlackBoxCoverage) are
-C++-only and not currently exposed through the Python bindings.
+@subsection python-serialization Saving and loading netlists
+
+@c NetlistSerializer reads and writes the same versioned JSON format as the
+@c --save-netlist and @c --load-netlist CLI options, so a netlist saved by
+either side can be loaded by the other.
+
+@code{.py}
+# Serialise to the versioned JSON format.
+text = rtl_wiring_inspector.NetlistSerializer.serialize(graph)
+
+# Restore it into a new, empty graph.
+loaded = rtl_wiring_inspector.NetlistGraph()
+rtl_wiring_inspector.NetlistSerializer.deserialize(text, loaded)
+@endcode
+
+The destination graph must be empty. Malformed JSON, a missing field, and an
+unsupported format version raise @c RuntimeError. The @c blackBoxes field is
+round-tripped too, so @ref python-black-boxes coverage queries work on a
+loaded graph.
+
+@subsection python-black-boxes Black-box coverage
+
+@c NetlistGraph.build accepts a @c black_boxes list as described in
+@ref black-boxes. The graph records the resolved hierarchical path of each
+black-boxed instance and classifies nodes against those paths:
+
+@code{.py}
+graph.build(compilation, am, black_boxes=["ram_*", "top.cpu.fpu"])
+
+print(graph.get_black_box_paths())
+
+coverage = graph.get_black_box_coverage(graph.lookup("top.cpu.fpu.rdata"))
+if coverage == rtl_wiring_inspector.BlackBoxCoverage.Boundary:
+    print("port on the black-box boundary")
+elif coverage == rtl_wiring_inspector.BlackBoxCoverage.Contained:
+    print("inside the black box")
+else:
+    print("outside every black box")
+@endcode
+
+@c BlackBoxCoverage.Outside covers nodes outside every box (including nodes
+without a hierarchical path), @c Boundary a port directly below a black box,
+and @c Contained anything else at or below one.
 
 @subsection python-pathfinding Path finding
 
@@ -417,9 +473,15 @@ Available node types and their properties:
 
 The @c bounds property on nodes and edges is a @c DriverBitRange with
 @c lower, @c upper, and @c width accessors; it also unpacks as a
-@c (lower, @c upper) tuple.
+@c (lower, @c upper) tuple. A @c BitDriver from
+@c NetlistGraph.get_bit_drivers has the same @c bounds property plus a
+@c driver node reference.
 
-Edge properties: @c symbol_name, @c symbol_path, @c bounds, @c disabled.
+Every node exposes @c out_edges and @c in_edges as lists of @c NetlistEdge
+references. Edge properties: @c source, @c target, @c edge_kind (a
+@c pyslang.ast.EdgeKind clock sensitivity), @c symbol_name, @c symbol_path,
+@c bounds, @c disabled. Edge and node references are views into the graph, so
+keep the owning @c NetlistGraph alive while using them.
 
 
 @section performance Performance tuning
@@ -606,6 +668,10 @@ The Python equivalent passes a list of patterns to @c NetlistGraph.build:
 @code{.py}
 graph.build(compilation, am, black_boxes=["ram_*", "top.cpu.fpu"])
 @endcode
+
+The resolved paths and per-node classification are available from Python via
+@c NetlistGraph.get_black_box_paths and @c NetlistGraph.get_black_box_coverage;
+see @ref python-black-boxes.
 
 @subsection glob-syntax Glob pattern syntax
 

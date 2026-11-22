@@ -14,10 +14,12 @@
 #include "netlist/NetlistGraph.hpp"
 #include "netlist/NetlistNode.hpp"
 #include "netlist/NetlistPath.hpp"
+#include "netlist/NetlistSerializer.hpp"
 #include "netlist/PathFinder.hpp"
 #include "netlist/VisitAll.hpp"
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -100,7 +102,7 @@ NB_MODULE(rtl_wiring_inspector, m) {
           [](const netlist::NetlistGraph &self, std::string_view name) {
             return self.lookup(name);
           },
-          nb::arg("name"), nb::rv_policy::reference,
+          nb::arg("name"), nb::rv_policy::reference_internal,
           "Lookup a node by hierarchical name.")
       .def(
           "lookup_by_range",
@@ -187,6 +189,32 @@ NB_MODULE(rtl_wiring_inspector, m) {
           nb::arg("name"), nb::arg("lower"), nb::arg("upper"),
           nb::rv_policy::reference,
           "Return driver nodes for the symbol over the given bit range.")
+      .def(
+          "get_bit_drivers",
+          [](netlist::NetlistGraph const &self, std::string_view name) {
+            nb::list result;
+            for (auto const &bitDriver : self.getBitDrivers(name)) {
+              result.append(nb::cast(bitDriver, nb::rv_policy::copy));
+            }
+            return result;
+          },
+          nb::arg("name"),
+          "Return the per-bit drivers of the whole symbol `name`. Unlike "
+          "`get_drivers`, this keeps one entry per contributing edge, each "
+          "clipped to the sub-range of `name` that the driver covers.")
+      .def(
+          "get_bit_drivers",
+          [](netlist::NetlistGraph const &self, std::string_view name,
+             int32_t lower, int32_t upper) {
+            nb::list result;
+            for (auto const &bitDriver : self.getBitDrivers(
+                     name, netlist::DriverBitRange(lower, upper))) {
+              result.append(nb::cast(bitDriver, nb::rv_policy::copy));
+            }
+            return result;
+          },
+          nb::arg("name"), nb::arg("lower"), nb::arg("upper"),
+          "Return the per-bit drivers of `name` over the given bit range.")
       .def("get_comb_fan_out", &netlist::NetlistGraph::getCombFanOut,
            nb::arg("node"), nb::rv_policy::reference,
            "Return all nodes reachable via combinational edges in the "
@@ -225,7 +253,22 @@ NB_MODULE(rtl_wiring_inspector, m) {
            "fan-in bottoms out only at Constants (i.e. the sink is tied off "
            "to literal values). Returns an empty list if any non-constant "
            "source reaches `node` (a State node, or an undriven top-level "
-           "input Port) or if `node` has no Constant in its fan-in.");
+           "input Port) or if `node` has no Constant in its fan-in.")
+      .def(
+          "get_black_box_paths",
+          [](netlist::NetlistGraph const &self) {
+            nb::list result;
+            for (auto const &path : self.getBlackBoxPaths()) {
+              result.append(nb::cast(path));
+            }
+            return result;
+          },
+          "Return the hierarchical paths of the black-boxed instances "
+          "recorded while building the graph.")
+      .def("get_black_box_coverage",
+           &netlist::NetlistGraph::getBlackBoxCoverage, nb::arg("node"),
+           "Classify `node` against the recorded black-box instance paths "
+           "as `BlackBoxCoverage.Outside`, `.Boundary` or `.Contained`.");
 
   nb::enum_<netlist::NodeKind>(m, "NodeKind")
       .value("None", netlist::NodeKind::None)
@@ -239,11 +282,35 @@ NB_MODULE(rtl_wiring_inspector, m) {
       .value("Constant", netlist::NodeKind::Constant)
       .value("Operation", netlist::NodeKind::Operation);
 
+  nb::enum_<netlist::BlackBoxCoverage>(m, "BlackBoxCoverage")
+      .value("Outside", netlist::BlackBoxCoverage::Outside)
+      .value("Boundary", netlist::BlackBoxCoverage::Boundary)
+      .value("Contained", netlist::BlackBoxCoverage::Contained);
+
   nb::class_<netlist::NetlistNode>(m, "NetlistNode")
       .def_prop_ro("ID",
                    [](netlist::NetlistNode const &self) { return self.ID; })
       .def_prop_ro("kind",
                    [](netlist::NetlistNode const &self) { return self.kind; })
+      .def_prop_ro(
+          "out_edges",
+          [](netlist::NetlistNode const &self) {
+            std::vector<netlist::NetlistEdge *> result;
+            for (auto const &edge : self.getOutEdges()) {
+              result.push_back(edge.get());
+            }
+            return result;
+          },
+          nb::rv_policy::reference_internal,
+          "Return the outgoing edges as a list of `NetlistEdge` references.")
+      .def_prop_ro(
+          "in_edges",
+          [](netlist::NetlistNode const &self) {
+            return std::vector<netlist::NetlistEdge *>(
+                self.getInEdges().begin(), self.getInEdges().end());
+          },
+          nb::rv_policy::reference_internal,
+          "Return the incoming edges as a list of `NetlistEdge` references.")
       .def(
           "get_location",
           [](netlist::NetlistNode const &self) -> nb::object {
@@ -329,6 +396,22 @@ NB_MODULE(rtl_wiring_inspector, m) {
 
   nb::class_<netlist::NetlistEdge>(m, "NetlistEdge")
       .def(nb::init<netlist::NetlistNode &, netlist::NetlistNode &>())
+      .def_prop_ro(
+          "source",
+          [](netlist::NetlistEdge const &self) -> netlist::NetlistNode & {
+            return self.getSourceNode();
+          },
+          nb::rv_policy::reference, "The source node of this edge.")
+      .def_prop_ro(
+          "target",
+          [](netlist::NetlistEdge const &self) -> netlist::NetlistNode & {
+            return self.getTargetNode();
+          },
+          nb::rv_policy::reference, "The target node of this edge.")
+      .def_prop_ro(
+          "edge_kind",
+          [](netlist::NetlistEdge const &self) { return self.edgeKind; },
+          "The clock sensitivity of this edge as a `pyslang.ast.EdgeKind`.")
       .def_prop_ro("symbol_name",
                    [](const netlist::NetlistEdge &self) {
                      return self.symbol != nullptr ? self.symbol->name
@@ -345,6 +428,19 @@ NB_MODULE(rtl_wiring_inspector, m) {
       .def_prop_ro("disabled", [](const netlist::NetlistEdge &self) {
         return self.disabled;
       });
+
+  nb::class_<netlist::NetlistGraph::BitDriver>(m, "BitDriver")
+      .def_prop_ro(
+          "bounds",
+          [](netlist::NetlistGraph::BitDriver const &self) {
+            return self.bounds;
+          },
+          "The sub-range of the queried symbol that this driver covers.")
+      .def_prop_ro(
+          "driver",
+          [](netlist::NetlistGraph::BitDriver const &self)
+              -> netlist::NetlistNode & { return *self.driver; },
+          nb::rv_policy::reference, "The node driving this bit range.");
 
   nb::class_<netlist::NetlistPath>(m, "NetlistPath")
       .def(nb::init<>())
@@ -405,4 +501,25 @@ NB_MODULE(rtl_wiring_inspector, m) {
            "Find a combinatorial path between two nodes that does not pass "
            "through State nodes. Return an empty NetlistPath if no "
            "combinatorial path exists.");
+
+  nb::class_<netlist::NetlistSerializer>(m, "NetlistSerializer")
+      .def_static("serialize", &netlist::NetlistSerializer::serialize,
+                  nb::arg("graph"),
+                  "Serialise a graph to the versioned JSON netlist format. The "
+                  "result is interchangeable with the CLI's `--save-netlist` "
+                  "output.")
+      .def_static(
+          "deserialize",
+          [](std::string_view jsonStr, netlist::NetlistGraph &graph) {
+            try {
+              netlist::NetlistSerializer::deserialize(jsonStr, graph);
+            } catch (std::exception const &ex) {
+              throw std::runtime_error(ex.what());
+            }
+          },
+          nb::arg("json_str"), nb::arg("graph"),
+          "Deserialise a JSON netlist into `graph`, which must be empty. The "
+          "input is interchangeable with the CLI's `--load-netlist` input. "
+          "Raises `RuntimeError` on a parse failure or an unsupported format "
+          "version.");
 }
