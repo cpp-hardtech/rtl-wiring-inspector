@@ -89,15 +89,16 @@ public:
   /// entry for each symbol and populate it with the driver information.
   void handle(ast::ValueSymbol const &symbol) {
     auto path = symbol.getHierarchicalPath();
-    if (!nameMatches(path)) {
+    if (!acceptSymbol(symbol, path)) {
       return;
     }
     auto value = ValueInfo{
         .path = std::move(path), .location = symbol.location, .drivers = {}};
 
-    auto drivers = analysisManager.getDrivers(symbol);
+    auto const &driverSymbol = canonicalValueSymbol(symbol);
+    auto drivers = analysisManager.getDrivers(driverSymbol);
     for (auto const *driver : drivers) {
-      value.drivers.emplace_back(driverPathToString(symbol, *driver),
+      value.drivers.emplace_back(driverPathToString(driverSymbol, *driver),
                                  driver->kind,
                                  netlist::DriverBitRange(driver->getBounds()),
                                  driver->getSourceRange().start());

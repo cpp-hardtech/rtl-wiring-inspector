@@ -60,7 +60,7 @@ public:
 
   void handle(const ast::PortSymbol &symbol) {
     auto path = symbol.getHierarchicalPath();
-    if (!nameMatches(path)) {
+    if (!acceptSymbol(symbol, path)) {
       return;
     }
     items.push_back(PortInfo{
