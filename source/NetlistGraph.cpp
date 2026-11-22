@@ -462,6 +462,29 @@ auto NetlistGraph::findNodesRegex(std::string_view pattern) const
   return result;
 }
 
+void NetlistGraph::setBlackBoxPatterns(std::vector<std::string> patterns) {
+  blackBoxPatterns = std::move(patterns);
+  blackBoxPatternMatched.assign(blackBoxPatterns.size(), false);
+}
+
+void NetlistGraph::markBlackBoxPatternMatched(size_t index) {
+  if (index < blackBoxPatternMatched.size()) {
+    blackBoxPatternMatched[index] = true;
+  }
+}
+
+auto NetlistGraph::getUnmatchedBlackBoxPatterns() const
+    -> std::vector<std::string> {
+  std::vector<std::string> result;
+  for (size_t i = 0; i < blackBoxPatterns.size(); ++i) {
+    if (i >= blackBoxPatternMatched.size() ||
+        !blackBoxPatternMatched[i]) {
+      result.push_back(blackBoxPatterns[i]);
+    }
+  }
+  return result;
+}
+
 auto NetlistGraph::getBlackBoxCoverage(NetlistNode const &node) const
     -> BlackBoxCoverage {
   auto path = node.getHierarchicalPath();

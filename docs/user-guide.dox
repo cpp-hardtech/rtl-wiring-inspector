@@ -57,7 +57,10 @@ the full option list.
 - @c -j, @c --threads @c \<N\>: set the number of threads (0 = hardware
   concurrency, 1 = sequential).
 - @c --stats: print phase timings and peak memory to stderr.
-- @c --stats-json: print phase timings and peak memory in JSON format to stdout.
+- @c --stats-json: print phase timings and peak memory in JSON format to
+  stderr. Statistics never mix with query results on stdout, so the two
+  streams can be parsed independently. Either option on its own is a
+  complete action: the netlist is built and its statistics printed.
 - @c --no-resolve-assign-bits: disable bit-aligned dependency resolution of
   concatenations, replications, conversions, and equal-width conditional
   operators in assignments and port connections; see
@@ -102,6 +105,21 @@ signal to the end signal. Each step shows a source location and a description:
 When the design has been compiled with the slang AST available, source locations
 are available and the output includes annotated source lines; otherwise after
 loading a serialised netlist, a plain @c file:line:col format is used.
+
+Pass @c --format @c json to render a path as machine-readable JSON, or
+@c -o @c \<file\> to write the report to a file instead of stdout. The JSON
+form is an array of alternating steps:
+
+- a node step: @c {\"type\":\"node\", \"node_kind\": ..., \"name\": ...,
+  \"path\": ..., \"location\": ...}, where @c node_kind is the node kind
+  (@c Port, @c State, @c Assignment, ...), @c name is the symbol name when the
+  node has one, @c path is its hierarchical path, and @c location is
+  @c file:line:col;
+- an edge step: @c {\"type\":\"edge\", \"symbol_path\": ...,
+  \"bits\": ..., \"edge_kind\": ...}.
+
+The array starts and ends with a node step and contains exactly one fewer edge
+step than node steps.
 
 A single name can resolve to several split nodes, so the search tries every
 combination of same-named start and end nodes and reports the first path found.
@@ -173,7 +191,11 @@ rtl-wiring-inspector design.sv --report-registers --scope top.cpu --name "**.q_r
 
 The tabular query and report commands (@c --report-registers, @c --find,
 @c --find-regex, @c --fan-out, @c --fan-in, @c --sensitivity,
-@c --constant-drivers, and @c --drivers) accept @c --format @c \<table|json\>.
+@c --constant-drivers, and @c --drivers), plus the @c --from/@c --to path
+query and @c --comb-loops, accept @c --format @c \<table|json\>.
+For a path, @c --format @c json emits the alternating node/edge step array
+described above; for combinational loops it emits the loop array. @c table is
+the default and leaves each command's native text output unchanged.
 The default @c table renders an aligned text table; @c json emits an array of
 objects keyed by the lower-cased column headers (@c name, @c location,
 @c edge, @c value, @c bits, @c driver), which is convenient for scripting and
@@ -198,6 +220,14 @@ the graph that consist entirely of combinational (non-clocked) edges. Each
 loop is printed as a path from a node back to itself. A reported loop means
 the tool found a structural cycle in the source-level dependency graph; see
 @ref bit-dependency-resolution for caveats on precision.
+
+The @c --scope and @c --name filters apply to loop reports: a loop is kept
+when at least one of its nodes passes the filters. Pass @c --format @c json
+to emit loops as JSON instead: an array of objects with @c length (the number
+of nodes in the cycle), a @c nodes array of node steps, and an @c edges array
+of edge steps. The edges include the closing edge, so both arrays have
+@c length entries. An empty array is printed when no loop is found. The node
+and edge step schemas are the same as for path JSON.
 
 For AST-level reports (variables, ports, drivers, AST JSON dump) use
 @c rtl-report, see @ref cli-report below.
@@ -460,9 +490,18 @@ Use @c --stats to print a human-readable timing breakdown to stderr:
 rtl-wiring-inspector design.sv --report-registers --stats
 @endcode
 
-The output shows per-phase timings (collect, parallel DFA, drain, resolve
-R-values), per-task statistics (min/max/mean/median), and peak RSS. Use
-@c --stats-json for machine-readable JSON output.
+The output shows per-phase timings (parsing, elaboration, analysis, netlist
+construction), per-task statistics (min/max/mean/median), the netlist size,
+and peak RSS. The Netlist Build section is printed for every newly built
+graph, including designs that defer no blocks.
+
+Use @c --stats-json for machine-readable JSON output, also on stderr. Its
+@c time_seconds object holds one entry per phase, @c graph_source is
+@c \"built\" or @c \"loaded\", and @c black_boxes lists the requested
+patterns, the matched instance paths, and the patterns that matched nothing.
+When a netlist is loaded with @c --load-netlist, the load time is reported as
+@c time_seconds.load, @c graph_source is @c \"loaded\", and
+@c netlist_profile is omitted because no construction took place.
 
 @subsection perf-considerations Considerations
 
@@ -616,6 +655,11 @@ every instantiation of a module:
 @code{.ansi}
 rtl-wiring-inspector design.sv --black-box ram_* --black-box top.cpu.fpu
 @endcode
+
+A pattern that matches no instance is reported as a warning on stderr and
+otherwise ignored; it does not change the netlist or the exit status. Both
+@c --stats and @c --stats-json report the requested patterns, the matched
+instance paths, and any unmatched patterns.
 
 The Python equivalent passes a list of patterns to @c NetlistGraph.build:
 

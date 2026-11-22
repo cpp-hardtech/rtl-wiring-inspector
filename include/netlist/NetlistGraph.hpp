@@ -232,6 +232,22 @@ public:
     return blackBoxPaths;
   }
 
+  /// Record the --black-box patterns the build was configured with.
+  void setBlackBoxPatterns(std::vector<std::string> patterns);
+
+  /// Return the --black-box patterns the build was configured with.
+  [[nodiscard]] auto getBlackBoxPatterns() const
+      -> std::span<std::string const> {
+    return blackBoxPatterns;
+  }
+
+  /// Record that the --black-box pattern at @p index matched an instance.
+  void markBlackBoxPatternMatched(size_t index);
+
+  /// Return the configured --black-box patterns that matched no instance.
+  [[nodiscard]] auto getUnmatchedBlackBoxPatterns() const
+      -> std::vector<std::string>;
+
   /// Classify a node against the recorded black-box instance paths.
   ///
   /// A Port node directly below a black-boxed instance is on the boundary;
@@ -244,6 +260,8 @@ public:
 private:
   BuildProfile buildProfile;
   std::vector<std::string> blackBoxPaths;
+  std::vector<std::string> blackBoxPatterns;
+  std::vector<bool> blackBoxPatternMatched;
   mutable bool indexBuilt = false;
   mutable std::unordered_map<std::string, std::vector<NetlistNode *>> nodeIndex;
   void buildIndex() const;

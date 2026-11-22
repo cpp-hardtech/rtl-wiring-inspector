@@ -81,8 +81,8 @@ traded for soundness.
 
 | Group | Option | Purpose |
 | --- | --- | --- |
-| Query | `--from <signal>` | Start of the dependency query. |
-| Query | `--to <signal>` | End of the dependency query. |
+| Query | `--from <signal>` | Start of the dependency query (JSON with `--format json`). |
+| Query | `--to <signal>` | End of the dependency query (JSON with `--format json`). |
 | Query | `--fan-in <signal>` | Report the combinational fan-in. |
 | Query | `--fan-out <signal>` | Report the combinational fan-out. |
 | Search | `--find <name>` | Locate signals by name. |
@@ -90,7 +90,7 @@ traded for soundness.
 | Report | `--drivers` | Report, per bit, the drivers of a signal. |
 | Report | `--constant-drivers` | Report drivers whose value is constant. |
 | Report | `--sensitivity` | Report sensitivity of the selected signals. |
-| Report | `--comb-loops` | Detect combinational loops. |
+| Report | `--comb-loops` | Detect combinational loops (JSON with `--format json`). |
 | Report | `--report-registers` | Report registers in the design. |
 | Graph | `--netlist-dot <file>` | Write the graph in DOT format. |
 | Graph | `--save-netlist <file>` | Persist the built netlist. |
@@ -104,8 +104,8 @@ traded for soundness.
 | Output | `--format <format>` | Select the output format. |
 | Output | `--no-colours` | Disable ANSI colours. |
 | Output | `--colour` | Force ANSI colours even when stdout is not a terminal. |
-| Output | `--stats` | Print construction statistics. |
-| Output | `--stats-json` | Print construction statistics as JSON. |
+| Output | `--stats` | Print construction statistics to stderr. |
+| Output | `--stats-json` | Print construction statistics as JSON to stderr. |
 | Info | `--version` | Print the version and exit. |
 
 ## `rtl-report` options

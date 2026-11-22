@@ -180,6 +180,15 @@ module top(input logic i, output logic o);
 endmodule
 """
 
+# No procedural or continuous blocks: the build defers zero blocks.
+ZERO_DEFERRED_SV = """\
+module leaf(input logic a, output logic b);
+endmodule
+module top(input logic a);
+  leaf u(.a(a));
+endmodule
+"""
+
 class DriverTests(unittest.TestCase):
     executable = ...
 
@@ -235,9 +244,9 @@ class DriverTests(unittest.TestCase):
         return netlist
 
     @staticmethod
-    def _parse_stats(stdout):
-        """Extract and parse the JSON stats line from stdout."""
-        for line in stdout.splitlines():
+    def _parse_stats(output):
+        """Extract and parse the JSON stats line from a captured stream."""
+        for line in output.splitlines():
             line = line.strip()
             if line.startswith("{") and "time_seconds" in line:
                 return json.loads(line)
@@ -360,7 +369,7 @@ comb-loop.sv:10:10: note: assignment
 
     def test_stats_json_full_build(self):
         r = self.run_tool("rca.sv", "--report-registers", "--stats-json")
-        stats = self._parse_stats(r.stdout)
+        stats = self._parse_stats(r.stderr)
         self.assertIsNotNone(stats)
         times = stats["time_seconds"]
         for phase in ("parsing", "elaboration", "analysis", "netlist"):
@@ -368,13 +377,17 @@ comb-loop.sv:10:10: note: assignment
             self.assertGreater(times[phase], 0)
         self.assertIsInstance(stats["peak_rss_bytes"], int)
         self.assertGreater(stats["peak_rss_bytes"], 0)
-        # Register output should still be present.
+        self.assertEqual(stats["graph_source"], "built")
+        # Register output should still be present, and stdout must stay free
+        # of statistics.
         self.assertIn("rca.sum_q", r.stdout)
+        self.assertIsNone(self._parse_stats(r.stdout))
 
     def test_stats_json_not_present_without_flag(self):
         """Stats JSON is not emitted when --stats-json is not specified."""
         r = self.run_tool("rca.sv", "--report-registers")
         self.assertIsNone(self._parse_stats(r.stdout))
+        self.assertIsNone(self._parse_stats(r.stderr))
 
     def test_find_wildcard(self):
         r = self.run_tool("rca.sv", "--find", "rca.i_*")
@@ -804,6 +817,168 @@ comb-loop.sv:10:10: note: assignment
             )
         self.assertIn("note: inout port p", r.stdout)
         self.assertIn("note: output port q", r.stdout)
+
+    def test_path_format_json(self):
+        r = self.run_tool(
+            "rca.sv", "--from", "rca.i_op0", "--to", "rca.o_sum",
+            "--format", "json",
+        )
+        steps = json.loads(r.stdout)
+        nodes = [step for step in steps if step["type"] == "node"]
+        edges = [step for step in steps if step["type"] == "edge"]
+        self.assertEqual(steps[0]["type"], "node")
+        self.assertEqual(steps[-1]["type"], "node")
+        self.assertEqual(len(edges), len(nodes) - 1)
+        self.assertEqual(nodes[0]["path"], "rca.i_op0")
+        self.assertEqual(nodes[-1]["path"], "rca.o_sum")
+        for node in nodes:
+            self.assertEqual(
+                set(node), {"type", "node_kind", "name", "path", "location"}
+            )
+        for edge in edges:
+            self.assertEqual(
+                set(edge), {"type", "symbol_path", "bits", "edge_kind"}
+            )
+
+    def test_path_format_json_output_file(self):
+        with self.temp_path(".json") as outfile:
+            self.run_tool(
+                "rca.sv", "--from", "rca.i_op0", "--to", "rca.o_sum",
+                "--format", "json", "-o", outfile,
+            )
+            with open(outfile) as f:
+                steps = json.load(f)
+        self.assertEqual(steps[0]["path"], "rca.i_op0")
+        self.assertEqual(steps[-1]["path"], "rca.o_sum")
+
+    def test_path_format_json_loaded_netlist_location(self):
+        with self.temp_path(".json") as netlist:
+            self.run_tool("rca.sv", "--save-netlist", netlist)
+            r = self.run_tool(
+                "--load-netlist", netlist, "--from", "rca.i_op0", "--to",
+                "rca.o_sum", "--format", "json",
+            )
+        steps = json.loads(r.stdout)
+        first = steps[0]
+        self.assertEqual(first["path"], "rca.i_op0")
+        self.assertRegex(first["location"], r"^rca\.sv:\d+:\d+$")
+
+    def test_comb_loops_format_json(self):
+        r = self.run_tool("comb-loop.sv", "--comb-loops", "--format", "json")
+        loops = json.loads(r.stdout)
+        self.assertEqual(len(loops), 1)
+        loop = loops[0]
+        self.assertEqual(set(loop), {"length", "nodes", "edges"})
+        self.assertEqual(loop["length"], len(loop["nodes"]))
+        # A cycle lists the closing edge as well.
+        self.assertEqual(len(loop["edges"]), len(loop["nodes"]))
+        for step in loop["nodes"]:
+            self.assertEqual(step["type"], "node")
+        for step in loop["edges"]:
+            self.assertEqual(step["type"], "edge")
+
+    def test_comb_loops_format_json_no_loops(self):
+        r = self.run_tool("rca.sv", "--comb-loops", "--format", "json")
+        self.assertEqual(json.loads(r.stdout), [])
+
+    def test_comb_loops_json_scope_filter(self):
+        r = self.run_tool(
+            "comb-loop.sv", "--comb-loops", "--format", "json",
+            "--scope", "m.t",
+        )
+        self.assertEqual(len(json.loads(r.stdout)), 1)
+        r = self.run_tool(
+            "comb-loop.sv", "--comb-loops", "--format", "json",
+            "--scope", "m.nonexistent",
+        )
+        self.assertEqual(json.loads(r.stdout), [])
+
+    def test_comb_loops_json_output_file(self):
+        with self.temp_path(".json") as outfile:
+            self.run_tool(
+                "comb-loop.sv", "--comb-loops", "--format", "json", "-o",
+                outfile,
+            )
+            with open(outfile) as f:
+                loops = json.load(f)
+        self.assertEqual(len(loops), 1)
+
+    def test_stats_alone_is_an_action(self):
+        r = self.run_tool("rca.sv", "--stats")
+        self.assertEqual(r.stdout, "")
+        self.assertIn("Phase Timing", r.stderr)
+
+    def test_stats_json_alone_is_an_action(self):
+        r = self.run_tool("rca.sv", "--stats-json")
+        self.assertEqual(r.stdout, "")
+        stats = self._parse_stats(r.stderr)
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["graph_source"], "built")
+
+    def test_stats_json_loaded_netlist(self):
+        with self.temp_path(".json") as netlist:
+            self.run_tool("rca.sv", "--save-netlist", netlist)
+            r = self.run_tool(
+                "--load-netlist", netlist, "--report-registers", "--stats-json"
+            )
+        stats = self._parse_stats(r.stderr)
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["graph_source"], "loaded")
+        self.assertIn("load", stats["time_seconds"])
+        self.assertGreater(stats["time_seconds"]["load"], 0)
+        self.assertNotIn("netlist_profile", stats)
+        self.assertIn("rca.sum_q", r.stdout)
+        self.assertIsNone(self._parse_stats(r.stdout))
+
+    def test_stats_human_zero_deferred_blocks(self):
+        r = self.run_tool(
+            "--report-registers", "--stats", source=ZERO_DEFERRED_SV
+        )
+        self.assertIn("Netlist Build", r.stderr)
+        self.assertNotIn("DFA Tasks", r.stderr)
+
+    def test_blackbox_zero_match_warns(self):
+        baseline = self.run_tool("rca.sv", "--report-registers").stdout
+        r = self.run_tool(
+            "rca.sv", "--black-box", "NOMATCH_XYZ", "--report-registers"
+        )
+        self.assertIn("matched no instances", r.stderr)
+        self.assertIn("NOMATCH_XYZ", r.stderr)
+        # A zero-match pattern does not change the netlist.
+        self.assertEqual(r.stdout, baseline)
+
+    def test_blackbox_stats_json(self):
+        r = self.run_tool(
+            "--black-box", "sub", "--report-registers", "--stats-json",
+            source=BLACKBOX_SV,
+        )
+        stats = self._parse_stats(r.stderr)
+        self.assertIsNotNone(stats)
+        black_boxes = stats["black_boxes"]
+        self.assertEqual(black_boxes["patterns"], ["sub"])
+        self.assertEqual(black_boxes["matched_paths"], ["top.u"])
+        self.assertEqual(black_boxes["unmatched_patterns"], [])
+
+    def test_blackbox_zero_match_stats_json(self):
+        r = self.run_tool(
+            "--black-box", "NOMATCH_XYZ", "--report-registers", "--stats-json",
+            source=BLACKBOX_SV,
+        )
+        stats = self._parse_stats(r.stderr)
+        self.assertIsNotNone(stats)
+        black_boxes = stats["black_boxes"]
+        self.assertEqual(black_boxes["patterns"], ["NOMATCH_XYZ"])
+        self.assertEqual(black_boxes["matched_paths"], [])
+        self.assertEqual(black_boxes["unmatched_patterns"], ["NOMATCH_XYZ"])
+
+    def test_blackbox_stats_human_lists_matched_paths(self):
+        r = self.run_tool(
+            "--black-box", "sub", "--report-registers", "--stats",
+            source=BLACKBOX_SV,
+        )
+        self.assertIn("Black boxes: 1 matched path", r.stderr)
+        self.assertIn("top.u", r.stderr)
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

@@ -517,6 +517,149 @@ auto main(int argc, char **argv) -> int {
     }
   };
 
+  auto nodeKindName = [](NodeKind kind) -> std::string_view {
+    switch (kind) {
+    case NodeKind::Port:
+      return "Port";
+    case NodeKind::Variable:
+      return "Variable";
+    case NodeKind::Assignment:
+      return "Assignment";
+    case NodeKind::Conditional:
+      return "Conditional";
+    case NodeKind::Case:
+      return "Case";
+    case NodeKind::Merge:
+      return "Merge";
+    case NodeKind::State:
+      return "State";
+    case NodeKind::Constant:
+      return "Constant";
+    case NodeKind::Operation:
+      return "Operation";
+    default:
+      return "None";
+    }
+  };
+
+  auto edgeKindName = [](ast::EdgeKind kind) -> std::string_view {
+    switch (kind) {
+    case ast::EdgeKind::PosEdge:
+      return "PosEdge";
+    case ast::EdgeKind::NegEdge:
+      return "NegEdge";
+    case ast::EdgeKind::BothEdges:
+      return "BothEdges";
+    default:
+      return "None";
+    }
+  };
+
+  // Append one node step of the path/loop JSON representation.
+  auto writeNodeStep = [&](JsonWriter &writer, NetlistNode const &node,
+                           FileTable const &fileTable) {
+    writer.startObject();
+    writer.writeProperty("type");
+    writer.writeValue(std::string_view("node"));
+    writer.writeProperty("node_kind");
+    writer.writeValue(nodeKindName(node.kind));
+    writer.writeProperty("name");
+    switch (node.kind) {
+    case NodeKind::Port:
+      writer.writeValue(node.as<Port>().name);
+      break;
+    case NodeKind::State:
+      writer.writeValue(node.as<State>().name);
+      break;
+    case NodeKind::Variable:
+      writer.writeValue(node.as<Variable>().name);
+      break;
+    default:
+      writer.writeValue(std::string_view{});
+      break;
+    }
+    writer.writeProperty("path");
+    auto path = node.getHierarchicalPath();
+    writer.writeValue(path ? *path : std::string_view{});
+    writer.writeProperty("location");
+    auto location = node.getLocation();
+    auto locationText =
+        location ? location->toString(fileTable) : std::string();
+    writer.writeValue(locationText);
+    writer.endObject();
+  };
+
+  // Append one edge step of the path/loop JSON representation.
+  auto writeEdgeStep = [&](JsonWriter &writer, NetlistEdge const &edge) {
+    writer.startObject();
+    writer.writeProperty("type");
+    writer.writeValue(std::string_view("edge"));
+    writer.writeProperty("symbol_path");
+    writer.writeValue(edge.symbol
+                          ? std::string_view(edge.symbol->hierarchicalPath)
+                          : std::string_view{});
+    writer.writeProperty("bits");
+    writer.writeValue(toString(edge.bounds));
+    writer.writeProperty("edge_kind");
+    writer.writeValue(edgeKindName(edge.edgeKind));
+    writer.endObject();
+  };
+
+  // Serialize a path as an alternating node/edge step array. The number of
+  // edge steps is one less than the number of node steps.
+  auto pathToJson = [&](NetlistPath const &path,
+                        FileTable const &fileTable) -> std::string {
+    JsonWriter writer;
+    writer.setPrettyPrint(true);
+    writer.startArray();
+    for (size_t i = 0; i < path.size(); ++i) {
+      writeNodeStep(writer, *path[i], fileTable);
+      if (i + 1 < path.size()) {
+        auto edgeIt = path[i]->findEdgeTo(*path[i + 1]);
+        SLANG_ASSERT(edgeIt != path[i]->end() &&
+                     "edge between nodes not found in path");
+        writeEdgeStep(writer, **edgeIt);
+      }
+    }
+    writer.endArray();
+    return fmt::format("{}\n", writer.view());
+  };
+
+  // Serialize detected loops. Each entry lists the cycle's nodes and the
+  // edges connecting consecutive nodes, including the closing edge.
+  auto loopsToJson = [&](
+      std::vector<std::vector<NetlistNode const *>> const &cycles,
+      FileTable const &fileTable) -> std::string {
+    JsonWriter writer;
+    writer.setPrettyPrint(true);
+    writer.startArray();
+    for (auto const &cycle : cycles) {
+      writer.startObject();
+      writer.writeProperty("length");
+      writer.writeValue(static_cast<int64_t>(cycle.size()));
+      writer.writeProperty("nodes");
+      writer.startArray();
+      for (auto const *node : cycle) {
+        writeNodeStep(writer, *node, fileTable);
+      }
+      writer.endArray();
+      writer.writeProperty("edges");
+      writer.startArray();
+      for (size_t i = 0; i < cycle.size(); ++i) {
+        auto const *from = cycle[i];
+        auto const *to = cycle[(i + 1) % cycle.size()];
+        auto edgeIt = from->findEdgeTo(*to);
+        SLANG_ASSERT(edgeIt != from->end() &&
+                     "edge between cycle nodes not found");
+        writeEdgeStep(writer, **edgeIt);
+      }
+      writer.endArray();
+      writer.endObject();
+    }
+    writer.endArray();
+    return fmt::format("{}\n", writer.view());
+  };
+
   // Emit a table either as a formatted text table or as a JSON array of
   // objects keyed by the lower-cased column headers.
   auto emitTable = [&](Utilities::Row const &header,
@@ -653,6 +796,7 @@ auto main(int argc, char **argv) -> int {
 
   // Pointer to the graph, set once it's constructed, for printStats access.
   NetlistGraph *graphPtr = nullptr;
+  bool graphLoaded = false;
 
   auto printStatsJson = [&] {
     auto peakRSS = OS::getPeakMemoryBytes();
@@ -669,56 +813,84 @@ auto main(int argc, char **argv) -> int {
     writer.writeValue(peakRSS);
 
     if (graphPtr) {
+      writer.writeProperty("graph_source");
+      writer.writeValue(graphLoaded ? std::string_view("loaded")
+                                     : std::string_view("built"));
       writer.writeProperty("graph_nodes");
       writer.writeValue(static_cast<int64_t>(graphPtr->numNodes()));
       writer.writeProperty("graph_edges");
       writer.writeValue(static_cast<int64_t>(graphPtr->numEdges()));
 
-      auto const &bp = graphPtr->getBuildProfile();
-      writer.writeProperty("netlist_profile");
+      // Build phasing is only meaningful for a freshly built graph.
+      if (!graphLoaded) {
+        auto const &bp = graphPtr->getBuildProfile();
+        writer.writeProperty("netlist_profile");
+        writer.startObject();
+
+        writer.writeProperty("phase1_collect_seconds");
+        writer.writeValue(bp.phase1_collectSeconds);
+        writer.writeProperty("phase2_parallel_seconds");
+        writer.writeValue(bp.phase2_parallelSeconds);
+        writer.writeProperty("phase3_drain_seconds");
+        writer.writeValue(bp.phase3_drainSeconds);
+        writer.writeProperty("phase4_rvalue_seconds");
+        writer.writeValue(bp.phase4_rvalueSeconds);
+        writer.writeProperty("phase5_merge_edges_seconds");
+        writer.writeValue(bp.phase5_mergeEdgesSeconds);
+
+        writer.writeProperty("drain_pending_rvalues_seconds");
+        writer.writeValue(bp.drain_pendingRValuesSeconds);
+        writer.writeProperty("drain_merges_seconds");
+        writer.writeValue(bp.drain_mergesSeconds);
+
+        writer.writeProperty("deferred_block_count");
+        writer.writeValue(static_cast<int64_t>(bp.deferredBlockCount));
+        writer.writeProperty("deferred_pending_rvalue_count");
+        writer.writeValue(static_cast<int64_t>(bp.deferredPendingRValueCount));
+
+        writer.writeProperty("task_min_seconds");
+        writer.writeValue(bp.taskMinSeconds);
+        writer.writeProperty("task_max_seconds");
+        writer.writeValue(bp.taskMaxSeconds);
+        writer.writeProperty("task_mean_seconds");
+        writer.writeValue(bp.taskMeanSeconds);
+        writer.writeProperty("task_median_seconds");
+        writer.writeValue(bp.taskMedianSeconds);
+        writer.writeProperty("task_total_seconds");
+        writer.writeValue(bp.taskTotalSeconds);
+        writer.writeProperty("task_cpu_total_seconds");
+        writer.writeValue(bp.taskCpuTotalSeconds);
+        writer.writeProperty("num_threads");
+        writer.writeValue(static_cast<int64_t>(bp.numThreads));
+
+        writer.endObject();
+      }
+
+      writer.writeProperty("black_boxes");
       writer.startObject();
-
-      writer.writeProperty("phase1_collect_seconds");
-      writer.writeValue(bp.phase1_collectSeconds);
-      writer.writeProperty("phase2_parallel_seconds");
-      writer.writeValue(bp.phase2_parallelSeconds);
-      writer.writeProperty("phase3_drain_seconds");
-      writer.writeValue(bp.phase3_drainSeconds);
-      writer.writeProperty("phase4_rvalue_seconds");
-      writer.writeValue(bp.phase4_rvalueSeconds);
-      writer.writeProperty("phase5_merge_edges_seconds");
-      writer.writeValue(bp.phase5_mergeEdgesSeconds);
-
-      writer.writeProperty("drain_pending_rvalues_seconds");
-      writer.writeValue(bp.drain_pendingRValuesSeconds);
-      writer.writeProperty("drain_merges_seconds");
-      writer.writeValue(bp.drain_mergesSeconds);
-
-      writer.writeProperty("deferred_block_count");
-      writer.writeValue(static_cast<int64_t>(bp.deferredBlockCount));
-      writer.writeProperty("deferred_pending_rvalue_count");
-      writer.writeValue(static_cast<int64_t>(bp.deferredPendingRValueCount));
-
-      writer.writeProperty("task_min_seconds");
-      writer.writeValue(bp.taskMinSeconds);
-      writer.writeProperty("task_max_seconds");
-      writer.writeValue(bp.taskMaxSeconds);
-      writer.writeProperty("task_mean_seconds");
-      writer.writeValue(bp.taskMeanSeconds);
-      writer.writeProperty("task_median_seconds");
-      writer.writeValue(bp.taskMedianSeconds);
-      writer.writeProperty("task_total_seconds");
-      writer.writeValue(bp.taskTotalSeconds);
-      writer.writeProperty("task_cpu_total_seconds");
-      writer.writeValue(bp.taskCpuTotalSeconds);
-      writer.writeProperty("num_threads");
-      writer.writeValue(static_cast<int64_t>(bp.numThreads));
-
+      writer.writeProperty("patterns");
+      writer.startArray();
+      for (auto const &pattern : graphPtr->getBlackBoxPatterns()) {
+        writer.writeValue(pattern);
+      }
+      writer.endArray();
+      writer.writeProperty("matched_paths");
+      writer.startArray();
+      for (auto const &path : graphPtr->getBlackBoxPaths()) {
+        writer.writeValue(path);
+      }
+      writer.endArray();
+      writer.writeProperty("unmatched_patterns");
+      writer.startArray();
+      for (auto const &pattern : graphPtr->getUnmatchedBlackBoxPatterns()) {
+        writer.writeValue(pattern);
+      }
+      writer.endArray();
       writer.endObject();
     }
 
     writer.endObject();
-    OS::print(fmt::format("{}\n", writer.view()));
+    OS::printE(fmt::format("{}\n", writer.view()));
   };
 
   auto printStatsHuman = [&] {
@@ -740,7 +912,7 @@ auto main(int argc, char **argv) -> int {
     phaseRows.push_back({"total", fmtTime(total)});
     Utilities::formatTable(buf, {"Phase", "Time"}, phaseRows);
 
-    if (graphPtr && graphPtr->getBuildProfile().deferredBlockCount > 0) {
+    if (graphPtr && !graphLoaded) {
       auto const &bp = graphPtr->getBuildProfile();
 
       buf.format("\nNetlist Build ({} thread{})\n", bp.numThreads,
@@ -770,6 +942,20 @@ auto main(int argc, char **argv) -> int {
     if (graphPtr) {
       buf.format("\nNetlist size: {} nodes, {} edges\n", graphPtr->numNodes(),
                  graphPtr->numEdges());
+
+      auto const &blackBoxPaths = graphPtr->getBlackBoxPaths();
+      auto const unmatched = graphPtr->getUnmatchedBlackBoxPatterns();
+      if (!blackBoxPaths.empty() || !unmatched.empty()) {
+        buf.format("\nBlack boxes: {} matched path{}\n",
+                   blackBoxPaths.size(),
+                   blackBoxPaths.size() == 1 ? "" : "s");
+        for (auto const &path : blackBoxPaths) {
+          buf.format("  {}\n", path);
+        }
+        for (auto const &pattern : unmatched) {
+          buf.format("  unmatched pattern: {}\n", pattern);
+        }
+      }
     }
 
     buf.format("\nPeak RSS: {:.1f} MB\n",
@@ -795,14 +981,17 @@ auto main(int argc, char **argv) -> int {
 
     if (loadNetlistFile) {
       // Load a previously-saved netlist (skips compilation).
+      graphLoaded = true;
       SmallVector<char> fileContent;
       auto ec = OS::readFile(*loadNetlistFile, fileContent);
       if (ec) {
         SLANG_THROW(std::runtime_error(
             fmt::format("could not read file: {}", *loadNetlistFile)));
       }
-      NetlistSerializer::deserialize(
-          std::string_view(fileContent.data(), fileContent.size()), graph);
+      timePhase("load", [&] {
+        NetlistSerializer::deserialize(
+            std::string_view(fileContent.data(), fileContent.size()), graph);
+      });
 
       DEBUG_PRINT("Loaded netlist has {} nodes and {} edges\n",
                   graph.numNodes(), graph.numEdges());
@@ -853,6 +1042,14 @@ auto main(int argc, char **argv) -> int {
 
       DEBUG_PRINT("Netlist has {} nodes and {} edges\n", graph.numNodes(),
                   graph.numEdges());
+
+      // A pattern that matched nothing is not an error, but silently doing
+      // nothing hides typos in the pattern.
+      for (auto const &pattern : graph.getUnmatchedBlackBoxPatterns()) {
+        fmt::print(stderr,
+                   "warning: --black-box pattern '{}' matched no instances\n",
+                   pattern);
+      }
 
       diagnostics =
           std::make_unique<NetlistDiagnostics>(*compilation, useColours);
@@ -997,19 +1194,45 @@ auto main(int argc, char **argv) -> int {
       return 0;
     }
 
-    // Report combinational loops.
+    // Report combinational loops, optionally filtered and machine-readable.
     if (combLoops) {
       CombLoops combLoopsAnalysis(graph);
       auto cycles = combLoopsAnalysis.getAllLoops();
-      if (cycles.empty()) {
-        OS::print("No combinational loops detected in the design.\n");
-      } else {
-        for (auto const &cycle : cycles) {
-          OS::print("Combinational loop detected:\n\n");
-          auto result = reportPath(graph.fileTable, diagnostics.get(), cycle);
-          OS::print(fmt::format("{}\n", result));
+
+      // Keep a loop when any of its nodes passes --scope/--name.
+      auto cyclePasses = [&](std::vector<NetlistNode const *> const &cycle) {
+        if (scopeFilters.empty() && nameFilters.empty()) {
+          return true;
+        }
+        return std::any_of(cycle.begin(), cycle.end(), [&](auto *node) {
+          auto path = node->getHierarchicalPath();
+          return path.has_value() && passesFilters(*path);
+        });
+      };
+      std::vector<std::vector<NetlistNode const *>> filtered;
+      for (auto const &cycle : cycles) {
+        if (cyclePasses(cycle)) {
+          filtered.push_back(cycle);
         }
       }
+
+      if (outputFormat == Format::Json) {
+        writeOutput(loopsToJson(filtered, graph.fileTable));
+        printStats();
+        return 0;
+      }
+
+      netlist::FormatBuffer buffer;
+      if (filtered.empty()) {
+        buffer.format("No combinational loops detected in the design.\n");
+      } else {
+        for (auto const &cycle : filtered) {
+          buffer.format("Combinational loop detected:\n\n");
+          buffer.format("{}\n",
+                        reportPath(graph.fileTable, diagnostics.get(), cycle));
+        }
+      }
+      writeOutput(buffer.str());
       printStats();
       return 0;
     }
@@ -1212,9 +1435,22 @@ auto main(int argc, char **argv) -> int {
             "no path between {} and {}", *fromPointName, *toPointName)));
       }
 
+      if (outputFormat == Format::Json) {
+        writeOutput(pathToJson(paths.front(), graph.fileTable));
+        printStats();
+        return 0;
+      }
+
       auto result =
           reportPath(graph.fileTable, diagnostics.get(), paths.front());
-      OS::print(fmt::format("{}\n", result));
+      writeOutput(fmt::format("{}\n", result));
+      printStats();
+      return 0;
+    }
+
+    // A bare --stats/--stats-json is a complete action: build (or load) the
+    // graph and report its statistics.
+    if (stats || statsJson) {
       printStats();
       return 0;
     }
