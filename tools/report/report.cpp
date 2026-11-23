@@ -35,11 +35,19 @@ auto generateJson(Compilation &compilation, JsonWriter &writer,
   ASTSerializer serializer(compilation, writer);
   if (scopeSymbols.empty()) {
     serializer.serialize(compilation.getRoot());
-  } else {
-    for (auto const *sym : scopeSymbols) {
-      serializer.serialize(*sym);
-    }
+    return;
   }
+  if (scopeSymbols.size() == 1) {
+    serializer.serialize(*scopeSymbols.front());
+    return;
+  }
+  // Multiple resolved scopes are emitted as one JSON array so that the
+  // output is always a single valid JSON value.
+  writer.startArray();
+  for (auto const *sym : scopeSymbols) {
+    serializer.serialize(*sym);
+  }
+  writer.endArray();
 }
 
 /// True if @p s contains any wildcard metacharacter recognised by
@@ -51,26 +59,32 @@ auto hasGlobChar(std::string_view s) -> bool {
 
 /// Recursively walk @p scope, appending every member whose hierarchical
 /// path matches @p pattern (deduped by symbol identity, preserving AST
-/// traversal order).
-void collectGlobMatches(const ast::Scope &scope, std::string const &pattern,
+/// traversal order) and returning the number of matches found. A matched
+/// member's subtree is not walked: visiting the member reports the whole
+/// subtree, so walking it again would only produce duplicate entries.
+auto collectGlobMatches(const ast::Scope &scope, std::string const &pattern,
                         std::unordered_set<const ast::Symbol *> &seen,
-                        std::vector<const ast::Symbol *> &out) {
+                        std::vector<const ast::Symbol *> &out) -> size_t {
+  size_t matches = 0;
   for (auto const &member : scope.members()) {
     auto path = member.getHierarchicalPath();
     if (!path.empty() &&
         netlist::wildcardMatch(path.c_str(), pattern.c_str())) {
+      ++matches;
       if (seen.insert(&member).second) {
         out.push_back(&member);
       }
+      continue;
     }
     if (auto const *inst = member.as_if<ast::InstanceSymbol>()) {
       if (!inst->body.flags.has(ast::InstanceFlags::Uninstantiated)) {
-        collectGlobMatches(inst->body, pattern, seen, out);
+        matches += collectGlobMatches(inst->body, pattern, seen, out);
       }
     } else if (auto const *childScope = member.as_if<ast::Scope>()) {
-      collectGlobMatches(*childScope, pattern, seen, out);
+      matches += collectGlobMatches(*childScope, pattern, seen, out);
     }
   }
+  return matches;
 }
 
 } // namespace
@@ -156,6 +170,30 @@ auto main(int argc, char **argv) -> int {
   }
 
   SLANG_TRY {
+    const auto actionCount =
+        int(reportPorts == true) + int(reportVariables == true) +
+        int(reportDrivers == true) + int(astJsonFile.has_value());
+    if (actionCount > 1) {
+      SLANG_THROW(std::runtime_error(
+          "multiple actions specified; pass exactly one of --ports, "
+          "--variables, --drivers, or --ast-json"));
+    }
+
+    enum class Format { Table, Json };
+    auto outputFormat = Format::Table;
+    if (format) {
+      if (*format == "json") {
+        outputFormat = Format::Json;
+      } else if (*format == "table") {
+        outputFormat = Format::Table;
+      } else {
+        SLANG_THROW(std::runtime_error(
+            fmt::format("unknown --format value '{}'; expected 'table' or "
+                        "'json'",
+                        *format)));
+      }
+    }
+
     if (!driver.processOptions()) {
       return 2;
     }
@@ -180,10 +218,9 @@ auto main(int argc, char **argv) -> int {
     scopeSymbols.reserve(scopes.size());
     for (auto const &scopeName : scopes) {
       if (hasGlobChar(scopeName)) {
-        auto const before = scopeSymbols.size();
-        collectGlobMatches(compilation->getRoot(), scopeName, seenSymbols,
-                           scopeSymbols);
-        if (scopeSymbols.size() == before) {
+        auto const matches = collectGlobMatches(
+            compilation->getRoot(), scopeName, seenSymbols, scopeSymbols);
+        if (matches == 0) {
           SLANG_THROW(std::runtime_error(
               fmt::format("scope '{}' matched no symbols", scopeName)));
         }
@@ -212,21 +249,6 @@ auto main(int argc, char **argv) -> int {
     compilation->getRoot().visit(va);
 
     compilation->freeze();
-
-    enum class Format { Table, Json };
-    auto outputFormat = Format::Table;
-    if (format) {
-      if (*format == "json") {
-        outputFormat = Format::Json;
-      } else if (*format == "table") {
-        outputFormat = Format::Table;
-      } else {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("unknown --format value '{}'; expected 'table' or "
-                        "'json'",
-                        *format)));
-      }
-    }
 
     auto writeOutput = [&](std::string_view content) {
       if (outputFile && *outputFile != "-") {

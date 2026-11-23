@@ -2,15 +2,18 @@
 
 #include "common/Utilities.hpp"
 #include "common/Wildcard.hpp"
+#include "report/CanonicalBodyResolver.hpp"
 
 #include "common/FormatBuffer.hpp"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
+#include "slang/ast/symbols/ValueSymbol.h"
 #include "slang/text/Json.h"
 #include "slang/text/SourceLocation.h"
 
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace slang::report {
@@ -25,16 +28,18 @@ namespace slang::report {
 ///   * `void appendItemRows(netlist::Utilities::Table&, Info const&) const;`
 ///   * `void emitJsonItem(JsonWriter&, Info const&) const;`
 /// and the relevant `handle(...)` methods for the AST visitor. Each
-/// `handle` should consult `nameMatches(symbol.getHierarchicalPath())`
-/// before recording to honour any `--name` filters set by the caller.
+/// `handle` should call `acceptSymbol` before recording to honour any
+/// `--name` filters set by the caller and to avoid reporting the same
+/// symbol twice when scopes overlap.
 template <typename Derived, typename Info>
 class ReportVisitorBase
-    : public ast::ASTVisitor<Derived, ast::VisitFlags::Expressions |
-                                          ast::VisitFlags::Canonical> {
+    : public ast::ASTVisitor<Derived, ast::VisitFlags::Expressions> {
 protected:
   ast::Compilation &compilation;
   std::vector<Info> items;
   std::vector<std::string> nameFilters;
+  CanonicalBodyResolver canonicalResolver;
+  std::unordered_set<const ast::Symbol *> reportedSymbols;
 
   /// Format a source location using the compilation's SourceManager.
   auto locationStr(SourceLocation loc) const -> std::string {
@@ -54,6 +59,24 @@ protected:
       }
     }
     return false;
+  }
+
+  /// Return true if @p path passes the name filters and @p symbol has not
+  /// been recorded yet. Overlapping --scope selections can visit the same
+  /// symbol more than once; the first visit wins.
+  auto acceptSymbol(ast::Symbol const &symbol, std::string_view path) -> bool {
+    if (!nameMatches(path)) {
+      return false;
+    }
+    return reportedSymbols.insert(&symbol).second;
+  }
+
+  /// Return the symbol that the AnalysisManager stores drivers against
+  /// for @p symbol, redirecting symbols in non-canonical instance bodies
+  /// to their canonical counterparts.
+  auto canonicalValueSymbol(ast::ValueSymbol const &symbol)
+      -> ast::ValueSymbol const & {
+    return canonicalResolver.getCanonicalValueSymbol(symbol);
   }
 
 public:

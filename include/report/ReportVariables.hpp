@@ -24,7 +24,7 @@ class ReportVariables
 
   auto record(ast::ValueSymbol const &symbol, std::string kind) -> void {
     auto path = symbol.getHierarchicalPath();
-    if (!nameMatches(path)) {
+    if (!acceptSymbol(symbol, path)) {
       return;
     }
     items.push_back(VariableInfo{
@@ -32,7 +32,8 @@ class ReportVariables
         .type = symbol.getType().toString(),
         .width = symbol.getType().getBitWidth(),
         .kind = std::move(kind),
-        .drivers = analysisManager.getDrivers(symbol).size(),
+        .drivers =
+            analysisManager.getDrivers(canonicalValueSymbol(symbol)).size(),
         .location = symbol.location,
     });
   }

@@ -286,11 +286,15 @@ exactly one of the following actions:
 - @c --ast-json @c \<file\>: dump the compiled AST as JSON to the given
   file (@c - for stdout). Table output is not meaningful for this mode.
 
+Passing more than one action is an error.
+
 @par Output format
 Use @c --format @c table (the default) or @c --format @c json on the
 three tabular actions to choose human-readable columns or
 machine-readable JSON. @c --ast-json is always JSON. The JSON drivers
-report nests the per-value drivers under each value entry.
+report nests the per-value drivers under each value entry. An unknown
+@c --format value is rejected regardless of the selected action; a valid
+value is ignored by @c --ast-json.
 
 @par Output destination
 By default the tabular actions print to stdout; pass @c -o /
@@ -304,6 +308,12 @@ hierarchical name (resolved via slang's name lookup) or a glob pattern
 expanded by walking the elaborated tree. @c rtl-report errors if a
 literal scope does not resolve or if a glob matches nothing.
 
+Scopes are applied to every instantiated scope in the design, so repeated
+instances of the same module report their own hierarchical paths. Overlap
+is removed before reporting: a symbol selected by more than one scope, or
+by both an ancestor and one of its descendants, is listed once. A glob
+that matches a scope covers that scope's whole subtree.
+
 The three tabular actions additionally accept @c --name @c \<pattern\>
 to restrict by hierarchical path. Multiple @c --name patterns combine
 with OR semantics; an empty match returns an empty result rather than
@@ -311,6 +321,12 @@ an error (the flag is a filter, not a selector).
 
 Both @c --scope and @c --name use the glob syntax described in
 @ref glob-syntax (@c *, @c ?, @c **, @c ...).
+
+@par AST JSON shape
+Without @c --scope, @c --ast-json dumps the root symbol. When exactly
+one scope resolves, it dumps a single JSON object for that scope. When
+several scopes resolve, it emits a JSON array with one object per scope,
+so the output is always one valid JSON value.
 
 @code{.ansi}
 # Inspect a single instance's ports.

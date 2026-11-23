@@ -11,6 +11,16 @@ from utilities import fuzzy_compare_strings
 class ReportTests(unittest.TestCase):
     executable = ...
 
+    def run_report(self, *args, check=True):
+        result = subprocess.run(
+            [self.executable, *args],
+            capture_output=True,
+            text=True,
+        )
+        if check:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
     def test_help(self):
         result = subprocess.run(
             [self.executable, "--help"],
@@ -680,6 +690,263 @@ rca.genblk1[6].i                         rca.sv:18:15
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         self.assertEqual(len(data), 6)
+
+    def test_multiple_actions_rejected(self):
+        for args in (
+            ("--variables", "--ports"),
+            ("--ports", "--variables"),
+            ("--drivers", "--variables"),
+            ("--ports", "--ast-json", "-"),
+            ("--ports", "--variables", "--drivers"),
+        ):
+            with self.subTest(args=args):
+                result = self.run_report("rca.sv", *args, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("multiple actions specified", result.stderr)
+                self.assertEqual(result.stdout, "")
+
+    def test_multiple_actions_rejected_before_compilation(self):
+        result = self.run_report(
+            "does-not-exist.sv", "--ports", "--variables", check=False
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("multiple actions specified", result.stderr)
+
+    def test_ast_json_invalid_format_rejected(self):
+        result = self.run_report(
+            "rca.sv", "--ast-json", "-", "--format", "yaml", check=False
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unknown --format value 'yaml'", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_ast_json_ignores_valid_format(self):
+        for fmt in ("table", "json"):
+            with self.subTest(fmt=fmt):
+                result = self.run_report(
+                    "rca.sv",
+                    "--ast-json",
+                    "-",
+                    "--format",
+                    fmt,
+                    "--scope",
+                    "rca.sum_q",
+                )
+                data = json.loads(result.stdout)
+                self.assertEqual(data["name"], "sum_q")
+
+    def test_ast_json_multiple_scopes_is_array(self):
+        result = self.run_report(
+            "rca.sv",
+            "--ast-json",
+            "-",
+            "--scope",
+            "rca.sum_q",
+            "--scope",
+            "rca.co_q",
+        )
+        data = json.loads(result.stdout)
+        self.assertIsInstance(data, list)
+        self.assertEqual([item["name"] for item in data], ["sum_q", "co_q"])
+
+    def test_ast_json_glob_scope_is_array(self):
+        result = self.run_report("rca.sv", "--ast-json", "-", "--scope", "rca.*_q")
+        data = json.loads(result.stdout)
+        self.assertIsInstance(data, list)
+        self.assertEqual([item["name"] for item in data], ["sum_q", "co_q"])
+
+    def test_ast_json_duplicate_scope_stays_single_object(self):
+        result = self.run_report(
+            "rca.sv",
+            "--ast-json",
+            "-",
+            "--scope",
+            "rca.sum_q",
+            "--scope",
+            "rca.sum_q",
+        )
+        data = json.loads(result.stdout)
+        self.assertIsInstance(data, dict)
+        self.assertEqual(data["name"], "sum_q")
+
+    def test_ast_json_recursive_glob_stays_single_object(self):
+        result = self.run_report("rca.sv", "--ast-json", "-", "--scope", "rca.**")
+        data = json.loads(result.stdout)
+        self.assertIsInstance(data, dict)
+        self.assertEqual(data["name"], "rca")
+        self.assertEqual(data["kind"], "Instance")
+
+    # Repeated module instances, generate constructs, instance arrays.
+    def test_scope_repeated_instance_ports(self):
+        result = self.run_report("hierarchy.sv", "--ports", "--scope", "top.u_second")
+        self.assertTrue(
+            fuzzy_compare_strings(
+                """
+Direction  Name            Width  Net Type  Location
+In         top.u_second.i  1      wire      hierarchy.sv:1:25
+Out        top.u_second.o  1      var       hierarchy.sv:1:41
+""",
+                result.stdout,
+            )
+        )
+
+    def test_scope_repeated_instance_variables(self):
+        result = self.run_report(
+            "hierarchy.sv",
+            "--variables",
+            "--scope",
+            "top.u_second",
+            "--format",
+            "json",
+        )
+        data = json.loads(result.stdout)
+        self.assertEqual(
+            [v["name"] for v in data], ["top.u_second.i", "top.u_second.o"]
+        )
+        self.assertEqual([v["drivers"] for v in data], [1, 1])
+
+    def test_scope_repeated_instance_drivers(self):
+        result = self.run_report(
+            "hierarchy.sv",
+            "--drivers",
+            "--scope",
+            "top.u_second",
+            "--format",
+            "json",
+        )
+        data = json.loads(result.stdout)
+        self.assertEqual(
+            [v["value"] for v in data], ["top.u_second.i", "top.u_second.o"]
+        )
+        for value in data:
+            self.assertEqual(len(value["drivers"]), 1)
+            self.assertEqual(value["drivers"][0]["range"], "[0]")
+            self.assertEqual(value["drivers"][0]["kind"], "cont")
+
+    def test_scope_generate_loop_instances(self):
+        result = self.run_report(
+            "hierarchy.sv",
+            "--ports",
+            "--scope",
+            "top.gen[*].u_loop",
+            "--format",
+            "json",
+        )
+        self.assertEqual(
+            [p["name"] for p in json.loads(result.stdout)],
+            [
+                "top.gen[0].u_loop.i",
+                "top.gen[0].u_loop.o",
+                "top.gen[1].u_loop.i",
+                "top.gen[1].u_loop.o",
+            ],
+        )
+
+    def test_scope_generate_if_instance(self):
+        result = self.run_report(
+            "hierarchy.sv",
+            "--ports",
+            "--scope",
+            "top.gen_if.u_if",
+            "--format",
+            "json",
+        )
+        self.assertEqual(
+            [p["name"] for p in json.loads(result.stdout)],
+            ["top.gen_if.u_if.i", "top.gen_if.u_if.o"],
+        )
+
+    def test_scope_instance_array(self):
+        result = self.run_report(
+            "hierarchy.sv",
+            "--ports",
+            "--scope",
+            "top.u_arr[*]",
+            "--format",
+            "json",
+        )
+        self.assertEqual(
+            [p["name"] for p in json.loads(result.stdout)],
+            [
+                "top.u_arr[0].i",
+                "top.u_arr[0].o",
+                "top.u_arr[1].i",
+                "top.u_arr[1].o",
+            ],
+        )
+
+    def test_all_instances_reported_once(self):
+        result = self.run_report("hierarchy.sv", "--ports", "--format", "json")
+        names = [p["name"] for p in json.loads(result.stdout)]
+        self.assertEqual(len(names), 20)
+        self.assertEqual(len(set(names)), 20)
+        for expected in (
+            "top.u_second.i",
+            "top.gen[1].u_loop.o",
+            "top.gen_if.u_if.i",
+            "top.u_arr[1].o",
+            "top.u_direct_b.o",
+        ):
+            self.assertIn(expected, names)
+
+    # Overlapping and recursive scopes report each symbol once.
+    def test_scope_recursive_glob_matches_literal_scope(self):
+        for action in ("--ports", "--variables", "--drivers"):
+            with self.subTest(action=action):
+                glob = self.run_report(
+                    "rca.sv", action, "--scope", "rca.**", "--format", "json"
+                )
+                literal = self.run_report(
+                    "rca.sv", action, "--scope", "rca", "--format", "json"
+                )
+                self.assertEqual(json.loads(glob.stdout), json.loads(literal.stdout))
+
+    def test_scope_overlapping_scopes_dedupe(self):
+        overlap = self.run_report(
+            "hierarchy.sv",
+            "--ports",
+            "--scope",
+            "top",
+            "--scope",
+            "top.u_second",
+            "--format",
+            "json",
+        )
+        single = self.run_report(
+            "hierarchy.sv", "--ports", "--scope", "top", "--format", "json"
+        )
+        self.assertEqual(json.loads(overlap.stdout), json.loads(single.stdout))
+
+    def test_scope_overlapping_scopes_reverse_order_dedupe(self):
+        overlap = self.run_report(
+            "hierarchy.sv",
+            "--ports",
+            "--scope",
+            "top.u_second",
+            "--scope",
+            "top",
+            "--format",
+            "json",
+        )
+        single = self.run_report(
+            "hierarchy.sv", "--ports", "--scope", "top", "--format", "json"
+        )
+        overlap_names = [p["name"] for p in json.loads(overlap.stdout)]
+        single_names = [p["name"] for p in json.loads(single.stdout)]
+        self.assertEqual(sorted(overlap_names), sorted(single_names))
+        self.assertEqual(len(overlap_names), len(set(overlap_names)))
+
+    def test_scope_recursive_glob_nested_dedupe(self):
+        glob = self.run_report(
+            "hierarchy.sv", "--ports", "--scope", "top.**", "--format", "json"
+        )
+        literal = self.run_report(
+            "hierarchy.sv", "--ports", "--scope", "top", "--format", "json"
+        )
+        self.assertEqual(
+            [p["name"] for p in json.loads(glob.stdout)],
+            [p["name"] for p in json.loads(literal.stdout)],
+        )
 
 
 if __name__ == "__main__":
