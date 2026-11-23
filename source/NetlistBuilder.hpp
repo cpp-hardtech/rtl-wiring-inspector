@@ -176,19 +176,30 @@ private:
                                 analysis::ValueDriver const &driver)
       -> std::string;
 
-  /// One event-list entry: signal symbol, its LSP expression, and edge
-  /// kind. Non-symbol expressions (bit-selects, arithmetic) are dropped.
+  /// One event-list entry: the root signal of an event expression, the
+  /// longest static prefix naming the bits it selects, the driven range,
+  /// and the edge kind.
   struct SensitivityEntry {
-    ast::ValueSymbol const *signal;
-    ast::Expression const *lsp;
-    ast::EdgeKind edgeKind;
+    ast::ValueSymbol const *signal{nullptr};
+    ast::Expression const *lsp{nullptr};
+    DriverBitRange bounds{0, 0};
+    ast::EdgeKind edgeKind{ast::EdgeKind::None};
   };
 
-  /// Per-signal sensitivity from a procedural block's event list. Empty
-  /// when the block is combinational (no timing control or any unqualified
-  /// event).
+  /// Sensitivity derived from a procedural block's event list. Empty
+  /// entries with `sequential` set mean the block is sequential but its
+  /// event expressions could not be resolved to any signal.
+  struct SensitivityInfo {
+    bool sequential{false};
+    SmallVector<SensitivityEntry> entries;
+  };
+
+  /// Per-signal sensitivity from a procedural block's event list. An event
+  /// expression (pure symbol, bit-select, or a gated expression) is
+  /// resolved to its value paths. `sequential` is false when the block is
+  /// combinational (no timing control or any unqualified event).
   static auto collectSensitivity(ast::ProceduralBlockSymbol const &symbol)
-      -> SmallVector<SensitivityEntry>;
+      -> SensitivityInfo;
 
   auto getVariable(ast::Symbol const &symbol, DriverBitRange bounds)
       -> NetlistNode * {
@@ -218,9 +229,15 @@ private:
   auto merge(NetlistNode &a, NetlistNode &b) -> NetlistNode &;
 
   struct InterfaceVarBounds {
-    ast::VariableSymbol const &symbol;
+    ast::ValueSymbol const &symbol;
     DriverBitRange bounds;
   };
+
+  /// Create a boundary Variable node for a member of an interface instance,
+  /// one per driven range, and record it as the driver of that range so
+  /// that both external modport connections and internal reads resolve to
+  /// it.
+  void materializeInterfaceMember(ast::ValueSymbol const &symbol);
 
   /// Helper method for resolving a modport port symbol LSP to interface
   /// variables and their bounds.
@@ -278,13 +295,19 @@ private:
                          DriverUpdate::Merge);
   }
 
-  /// Merge procedural drivers into the central tracker. Non-empty
+  /// Merge procedural drivers into the central tracker. A sequential
   /// @p sensitivity makes the block sequential: each driven range gets a
   /// State node, with data edges from drivers and a clock edge per
   /// sensitivity entry.
   void mergeDrivers(ast::EvalContext &evalCtx, ValueTracker const &valueTracker,
                     ValueDrivers const &valueDrivers,
-                    std::span<SensitivityEntry const> sensitivity = {});
+                    SensitivityInfo const &sensitivity);
+
+  /// Merge combinational procedural drivers into the central tracker.
+  void mergeDrivers(ast::EvalContext &evalCtx, ValueTracker const &valueTracker,
+                    ValueDrivers const &valueDrivers) {
+    mergeDrivers(evalCtx, valueTracker, valueDrivers, SensitivityInfo{});
+  }
 };
 
 } // namespace slang::netlist

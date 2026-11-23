@@ -1,4 +1,5 @@
 #include "Test.hpp"
+#include "netlist/CombLoops.hpp"
 
 TEST_CASE("Assigning to a variable", "[SequentialState]") {
   auto const &tree = (R"(
@@ -55,6 +56,7 @@ TEST_CASE("Two control paths assigning to the same variable",
   N5 -> N6
   N5 -> N8
   N6 -> N9
+  N6 -> N10 [label="b[0]"]
   N7 -> N6
   N8 -> N9
   N8 -> N10 [label="b[0]"]
@@ -95,6 +97,7 @@ endmodule
   N5 -> N6
   N5 -> N8
   N6 -> N9
+  N6 -> N10 [label="b[0]"]
   N7 -> N6
   N8 -> N9
   N8 -> N10 [label="b[0]"]
@@ -204,8 +207,10 @@ endmodule
   N4 -> N14 [label="ready[0]"]
   N6 -> N7
   N6 -> N11
+  N7 -> N16 [label="foo_q[0]"]
   N8 -> N7
   N9 -> N15
+  N9 -> N17 [label="valid_q[0]"]
   N10 -> N9
   N11 -> N12
   N11 -> N13
@@ -489,4 +494,130 @@ endmodule
   const NetlistTest test(tree);
   CHECK(test.pathExists("m.d", "m.y"));
   CHECK(test.findCombPath("m.d", "m.y").empty());
+}
+
+TEST_CASE("Non-blocking assignments in mutually exclusive branches all drive "
+          "the state",
+          "[SequentialState]") {
+  auto const &tree = R"(
+module m(input logic clk, input logic en, input logic a, input logic b,
+         output logic q);
+  always_ff @(posedge clk)
+    if (en)
+      q <= a;
+    else
+      q <= b;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.q"));
+  CHECK(test.pathExists("m.b", "m.q"));
+  CHECK(test.pathExists("m.en", "m.q"));
+}
+
+TEST_CASE("Non-blocking assignments in all case branches drive the state",
+          "[SequentialState]") {
+  auto const &tree = R"(
+module m(input logic clk, input logic [1:0] sel, input logic a, b, c,
+         output logic q);
+  always_ff @(posedge clk)
+    case (sel)
+      2'b00:   q <= a;
+      2'b01:   q <= b;
+      default: q <= c;
+    endcase
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.a", "m.q"));
+  CHECK(test.pathExists("m.b", "m.q"));
+  CHECK(test.pathExists("m.c", "m.q"));
+  CHECK(test.pathExists("m.sel", "m.q"));
+}
+
+TEST_CASE("Non-blocking async reset data branch drives the state",
+          "[SequentialState]") {
+  auto const &tree = R"(
+module m(input logic clk, input logic rst, input logic rval, input logic a,
+         output logic q);
+  always_ff @(posedge clk or posedge rst)
+    if (rst)
+      q <= rval;
+    else
+      q <= a;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.rval", "m.q"));
+  CHECK(test.pathExists("m.a", "m.q"));
+  CHECK(test.pathExists("m.rst", "m.q"));
+}
+
+TEST_CASE("Sensitivity: bit-select clock marks the register",
+          "[SequentialState][Sensitivity]") {
+  auto const &tree = R"(
+module m(input logic [1:0] clk, input logic d, output logic q);
+  always_ff @(posedge clk[0])
+    q <= d;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.d", "m.q"));
+  CHECK(countSensitivityEdges(test.graph, "m.clk", "m.q",
+                              ast::EdgeKind::PosEdge) == 1);
+}
+
+TEST_CASE("Sensitivity: gated clock expression marks the register",
+          "[SequentialState][Sensitivity]") {
+  auto const &tree = R"(
+module m(input logic clk, input logic en, input logic d, output logic q);
+  always_ff @(posedge (clk & en))
+    q <= d;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(test.pathExists("m.d", "m.q"));
+  CHECK(test.pathExists("m.clk", "m.q"));
+  CHECK(test.pathExists("m.en", "m.q"));
+  // The state boundary stops the register feedback from looking like a
+  // combinational loop.
+  CombLoops combLoops(test.graph);
+  CHECK(combLoops.getAllLoops().empty());
+}
+
+TEST_CASE("Sensitivity: bit-select async reset keeps its edge kind",
+          "[SequentialState][Sensitivity]") {
+  auto const &tree = R"(
+module m(input logic clk, input logic [1:0] rst_n, input logic d,
+         output logic q);
+  always_ff @(posedge clk or negedge rst_n[0])
+    q <= rst_n[0] ? d : 1'b0;
+endmodule
+)";
+  const NetlistTest test(tree);
+  CHECK(countSensitivityEdges(test.graph, "m.clk", "m.q",
+                              ast::EdgeKind::PosEdge) == 1);
+  CHECK(countSensitivityEdges(test.graph, "m.rst_n", "m.q",
+                              ast::EdgeKind::NegEdge) == 1);
+  CHECK(test.pathExists("m.d", "m.q"));
+  CHECK(test.pathExists("m.rst_n", "m.q"));
+}
+
+TEST_CASE("Sensitivity: unresolvable event expression still makes a state",
+          "[SequentialState][Sensitivity]") {
+  auto const &tree = R"(
+module m(input logic d, output logic q);
+  always_ff @(posedge 1'b1)
+    q <= d;
+endmodule
+)";
+  const NetlistTest test(tree);
+  bool sawState = false;
+  for (auto const &node : test.graph) {
+    if (node->kind == NodeKind::State) {
+      sawState = true;
+    }
+  }
+  CHECK(sawState);
+  CHECK(test.pathExists("m.d", "m.q"));
 }

@@ -96,6 +96,7 @@ endmodule
   N5 -> N6
   N5 -> N8
   N6 -> N9
+  N6 -> N10 [label="foo_q[0]"]
   N7 -> N6
   N8 -> N9
   N8 -> N10 [label="foo_q[0]"]
@@ -116,4 +117,32 @@ endmodule
 )";
   const NetlistTest test(tree);
   CHECK(test.graph.numNodes() > 0);
+}
+
+TEST_CASE("Inout port registers an input-side placeholder driver", "[Ports]") {
+  auto const &tree = R"(
+module sub(inout wire [3:0] x, output logic o);
+  assign o = x[3];
+endmodule
+
+module top(inout wire [3:0] a, output logic o);
+  sub u(.x(a), .o(o));
+endmodule
+)";
+  NetlistTest test(tree);
+  // Reading the inout port inside the module resolves to a boundary node
+  // rather than to nothing: the port node carries a dependency edge for
+  // the read of x[3].
+  bool hasReadDependency = false;
+  for (auto const *node : test.graph.findNodes("top.u.x")) {
+    for (auto const &edge : node->getOutEdges()) {
+      if (edge->symbol != nullptr &&
+          edge->symbol->hierarchicalPath == "top.u.x" &&
+          edge->bounds.overlaps(DriverBitRange{3, 3})) {
+        hasReadDependency = true;
+      }
+    }
+  }
+  CHECK(hasReadDependency);
+  CHECK(test.pathExists("top.u.x", "top.o"));
 }

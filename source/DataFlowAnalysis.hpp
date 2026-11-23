@@ -2,7 +2,6 @@
 
 #include "DriverMap.hpp"
 #include "IntervalMapUtils.hpp"
-#include "PendingRValue.hpp"
 #include "ValueTracker.hpp"
 
 #include "netlist/Debug.hpp"
@@ -28,6 +27,14 @@ struct AnalysisState {
   // Each tracked variable has its definitions intervals stored here.
   ValueDrivers valueDrivers;
 
+  // Definitions contributed by non-blocking assignments along the paths
+  // leading to this point. They are kept separate from `valueDrivers`
+  // until the block finishes, because a non-blocking assignment does not
+  // update the value seen by later reads in the same block. Carrying them
+  // in the state lets mutually exclusive branches all contribute while a
+  // later write on the same path replaces an earlier one.
+  ValueDrivers pendingNBAs;
+
   // The current control flow node in the graph.
   NetlistNode *node{nullptr};
 
@@ -40,17 +47,6 @@ struct AnalysisState {
   AnalysisState() = default;
   AnalysisState(AnalysisState &&other) = default;
   auto operator=(AnalysisState &&other) -> AnalysisState & = default;
-};
-
-struct PendingLvalue {
-  not_null<const ast::ValueSymbol *> symbol;
-  const ast::Expression *lsp;
-  DriverBitRange bounds;
-  NetlistNode *node{nullptr};
-
-  PendingLvalue(const ast::ValueSymbol *symbol, const ast::Expression *lsp,
-                DriverBitRange bounds, NetlistNode *node)
-      : symbol(symbol), lsp(lsp), bounds(bounds), node(node) {}
 };
 
 /// A data flow analysis used as part of the netlist graph construction.
@@ -81,10 +77,6 @@ struct DataFlowAnalysis
   // port node that is created by the DFA caller to reference port connection
   // lvalues against.
   NetlistNode *externalNode;
-
-  // Pending L-values from non-blocking assignments that need to be processed at
-  // the end of the procedural block.
-  std::vector<PendingRvalue> pendingLValues;
 
   // Allocator reused across every handleRvalue() invocation within the DFA.
   BumpAllocator rvalueAllocator;
@@ -204,6 +196,21 @@ struct DataFlowAnalysis
 
   void handle(ast::CaseStatement const &stmt);
 
+  /// For loops whose iteration variable is declared outside the header
+  /// (e.g. a module-level integer) are not unrolled by the base analysis,
+  /// which drops the body's definitions when the exit condition can't be
+  /// evaluated. Unroll them here when the iteration count is provable, and
+  /// otherwise analyse the body once conservatively.
+  void handle(ast::ForLoopStatement const &stmt);
+
+  /// Repeat loops: unroll a constant count; otherwise analyse the body
+  /// once while keeping the zero-iteration path.
+  void handle(ast::RepeatLoopStatement const &stmt);
+
+  /// While loops: analyse the body at least once when the condition is not
+  /// statically decidable, so the body's definitions are not lost.
+  void handle(ast::WhileLoopStatement const &stmt);
+
   /// Walk a conditional whose condition carries a pattern match, taking
   /// over the branch bookkeeping the base class would otherwise do. The
   /// base splits the flow state into branches before visiting the
@@ -240,6 +247,14 @@ private:
 
   void driveLhsLspSegment(const BitSliceSource &src, const Segment &seg);
   void driveRhsLspSegment(const BitSliceSource &src, const Segment &seg);
+
+  /// Try to unroll @p stmt when its loop variables are declared outside the
+  /// header. Returns true when the whole loop was visited. Sets @p
+  /// hasExternalStaticVar when at least one header initializer targets a
+  /// variable with static lifetime, which selects the conservative
+  /// at-least-once handling on failure.
+  auto tryUnrollExternalForLoop(ast::ForLoopStatement const &stmt,
+                                bool &hasExternalStaticVar) -> bool;
 };
 
 } // namespace slang::netlist

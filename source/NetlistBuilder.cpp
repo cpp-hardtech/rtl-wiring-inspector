@@ -130,8 +130,8 @@ auto NetlistBuilder::getDriverPathName(ast::ValueSymbol const &symbol,
 }
 
 auto NetlistBuilder::collectSensitivity(
-    ast::ProceduralBlockSymbol const &symbol) -> SmallVector<SensitivityEntry> {
-  SmallVector<SensitivityEntry> result;
+    ast::ProceduralBlockSymbol const &symbol) -> SensitivityInfo {
+  SensitivityInfo result;
 
   if (symbol.procedureKind != ast::ProceduralBlockKind::AlwaysFF &&
       symbol.procedureKind != ast::ProceduralBlockKind::Always) {
@@ -152,6 +152,14 @@ auto NetlistBuilder::collectSensitivity(
 
   auto const &timing = symbol.getBody().as<ast::TimedStatement>().timing;
 
+  // Implicit event controls (`always @*`, `always_comb`) are
+  // combinational rather than sequential.
+  if (timing.kind != ast::TimingControlKind::SignalEvent &&
+      timing.kind != ast::TimingControlKind::EventList) {
+    return result;
+  }
+
+  ast::EvalContext evalCtx(symbol);
   bool sawCombEvent = false;
 
   auto recordEvent = [&](ast::SignalEventControl const &sec) {
@@ -161,17 +169,32 @@ auto NetlistBuilder::collectSensitivity(
       sawCombEvent = true;
       return;
     }
-    // Skip non-symbol event expressions; the State node still captures
-    // the sequential nature.
-    if (ast::ValueExpressionBase::isKind(sec.expr.kind)) {
-      auto const &valExpr = sec.expr.as<ast::ValueExpressionBase>();
-      result.push_back({&valExpr.symbol, &sec.expr, sec.edge});
-    }
+
+    result.sequential = true;
+
+    // Resolve the event expression to its value paths. This handles pure
+    // symbols as well as bit-selects and gated clock expressions such as
+    // `posedge (clk & en)`; each path contributes its root symbol and
+    // selected bit range. An expression that resolves to no value path
+    // still leaves the block marked sequential, without a clock edge.
+    ast::ValuePath::visitPaths(
+        sec.expr, evalCtx, [&](ast::ValuePath const &path) {
+          auto const *rootSymbol = path.rootSymbol();
+          if (rootSymbol == nullptr) {
+            return;
+          }
+          auto const *lsp = path.lsp != nullptr ? path.lsp : path.rootExpr;
+          if (lsp == nullptr) {
+            return;
+          }
+          result.entries.push_back(
+              {rootSymbol, lsp, DriverBitRange(path.lspBounds), sec.edge});
+        });
   };
 
   if (timing.kind == ast::TimingControlKind::SignalEvent) {
     recordEvent(timing.as<ast::SignalEventControl>());
-  } else if (timing.kind == ast::TimingControlKind::EventList) {
+  } else {
     for (auto const *e : timing.as<ast::EventListControl>().events) {
       recordEvent(e->as<ast::SignalEventControl>());
     }
@@ -212,9 +235,11 @@ void NetlistBuilder::_resolveInterfaceRef(
                     toString(symbol.kind), symbol.name, toString(bounds),
                     Utilities::locationStr(compilation, symbol.location));
 
-        if (symbol.kind == ast::SymbolKind::Variable) {
-          // This is an interface variable, so add it to the result.
-          result.emplace_back(symbol.as<ast::VariableSymbol>(),
+        if (symbol.kind == ast::SymbolKind::Variable ||
+            symbol.kind == ast::SymbolKind::Net) {
+          // This is an interface member, so add it to the result. Both
+          // variables and nets are modelled as boundary Variable nodes.
+          result.emplace_back(symbol.as<ast::ValueSymbol>(),
                               DriverBitRange(bounds));
 
         } else if (symbol.kind == ast::SymbolKind::ModportPort) {
@@ -308,43 +333,49 @@ void NetlistBuilder::hookupOutputPort(ast::ValueSymbol const &symbol,
 
     // Lookup the port node in the graph. Safe to do eagerly here, unlike
     // the modport lookup above (see VariableTracker::lookup).
-    //
-    // The interval map may have split a single contiguous driver range into
-    // smaller sub-intervals (because another driver overwrote/merged part
-    // of it), so an exact-bounds lookup can miss. Fall back to any port
-    // node for this port whose bounds contain the sub-interval.
     const ast::PortSymbol *portSymbol = portBackRef->port;
-    NetlistNode *portNode = getVariable(*portSymbol, bounds);
-    if (portNode == nullptr) {
-      for (auto *candidate : getVariable(*portSymbol)) {
-        auto candidateBounds = candidate->getBounds();
-        if (candidateBounds.has_value() &&
-            ConstantRange(*candidateBounds).contains(bounds)) {
-          portNode = candidate;
-          break;
-        }
-      }
-    }
-    if (portNode != nullptr) {
+    auto symRef = toSymbolRef(symbol);
 
-      // Connect the drivers to the port node(s).
-      auto symRef = toSymbolRef(symbol);
+    // Fast path: a single port node covers exactly this range.
+    if (auto *portNode = getVariable(*portSymbol, bounds)) {
       for (auto const &driver : driverList) {
         if (driver.node != nullptr) {
           addDependency(*driver.node, *portNode, symRef, bounds);
+        }
+      }
+      return;
+    }
+
+    // The port's range can be split into several nodes, either because cut
+    // hints from a concatenated actual refined it or because the interval
+    // map split a contiguous driver range. A write that covers more than
+    // one such node has to fan out to each, annotated with the overlap so
+    // the edge stays bit-accurate.
+    for (auto *portNode : getVariable(*portSymbol)) {
+      auto portBounds = portNode->getBounds();
+      if (!portBounds) {
+        continue;
+      }
+      auto overlap = bounds.intersection(*portBounds);
+      if (!overlap) {
+        continue;
+      }
+      for (auto const &driver : driverList) {
+        if (driver.node != nullptr) {
+          addDependency(*driver.node, *portNode, symRef, *overlap);
         }
       }
     }
   }
 }
 
-void NetlistBuilder::mergeDrivers(
-    ast::EvalContext &evalCtx, ValueTracker const &valueTracker,
-    ValueDrivers const &valueDrivers,
-    std::span<SensitivityEntry const> sensitivity) {
+void NetlistBuilder::mergeDrivers(ast::EvalContext &evalCtx,
+                                  ValueTracker const &valueTracker,
+                                  ValueDrivers const &valueDrivers,
+                                  SensitivityInfo const &sensitivity) {
   DEBUG_PRINT("Merging procedural drivers\n");
 
-  bool const isSequential = !sensitivity.empty();
+  bool const isSequential = sensitivity.sequential;
 
   valueTracker.visitAll([&](const ast::ValueSymbol *symbol, uint32_t index) {
     DEBUG_PRINT("Symbol {} at index={}\n", symbol->name, index);
@@ -394,14 +425,12 @@ void NetlistBuilder::mergeDrivers(
         // Route each clock through the pending-rvalue resolver so input
         // ports, internal wires, gated clocks, and clock dividers all
         // hook up via the same driver-walk used for ordinary r-values.
-        for (auto const &entry : sensitivity) {
-          auto width = entry.signal->getType().getSelectableWidth();
-          if (width == 0) {
+        for (auto const &entry : sensitivity.entries) {
+          if (entry.signal == nullptr) {
             continue;
           }
-          DriverBitRange sigBounds{0, static_cast<int32_t>(width - 1)};
-          pendingQueue.enqueue(*entry.signal, *entry.lsp, sigBounds, &stateNode,
-                               entry.edgeKind);
+          pendingQueue.enqueue(*entry.signal, *entry.lsp, entry.bounds,
+                               &stateNode, entry.edgeKind);
         }
 
         // The State supersedes the declaration placeholder for this range,
@@ -450,37 +479,42 @@ void NetlistBuilder::handle(ast::PortSymbol const &symbol) {
   portHandler.materializePortNodes(symbol);
 }
 
-void NetlistBuilder::handle(ast::VariableSymbol const &symbol) {
-
-  // Identify interface variables.
-  if (auto const *scope = symbol.getParentScope()) {
-    auto const *container = scope->getContainingInstance();
-    if (container != nullptr && container->parentInstance != nullptr) {
-      if (container->parentInstance->isInterface()) {
-        DEBUG_PRINT("Interface variable {}\n", symbol.name);
-
-        // Same canonical-body redirect as for port internals; see
-        // materializePortNodes for the rationale.
-        auto const &driverQuerySymbol =
-            canonicalResolver.getCanonicalValueSymbol(symbol);
-        auto drivers = analysisManager.getDrivers(driverQuerySymbol);
-        for (auto const *driver : drivers) {
-          auto bounds = driver->getBounds();
-
-          DEBUG_PRINT("[{}:{}] driven by prefix={}\n", bounds.first,
-                      bounds.second, getDriverPathName(symbol, *driver));
-
-          // Create a variable node for the interface member's driven
-          // range, and record it as the driver of that range so reads of
-          // part of the member (a struct field or part-select) resolve to
-          // it as well as whole-range reads.
-          auto &node =
-              nodeFactory.createVariable(symbol, DriverBitRange(bounds));
-          addPlaceholderDriver(symbol, DriverBitRange(bounds), &node);
-        }
-      }
-    }
+void NetlistBuilder::materializeInterfaceMember(
+    ast::ValueSymbol const &symbol) {
+  auto const *scope = symbol.getParentScope();
+  if (scope == nullptr) {
+    return;
   }
+  auto const *container = scope->getContainingInstance();
+  if (container == nullptr || container->parentInstance == nullptr ||
+      !container->parentInstance->isInterface()) {
+    return;
+  }
+
+  DEBUG_PRINT("Interface member {}\n", symbol.name);
+
+  // Same canonical-body redirect as for port internals; see
+  // materializePortNodes for the rationale.
+  auto const &driverQuerySymbol =
+      canonicalResolver.getCanonicalValueSymbol(symbol);
+  auto drivers = analysisManager.getDrivers(driverQuerySymbol);
+  for (auto const *driver : drivers) {
+    auto bounds = driver->getBounds();
+
+    DEBUG_PRINT("[{}:{}] driven by prefix={}\n", bounds.first, bounds.second,
+                getDriverPathName(symbol, *driver));
+
+    // Create a variable node for the interface member's driven range, and
+    // record it as the driver of that range so reads of part of the member
+    // (a struct field or part-select) resolve to it as well as whole-range
+    // reads.
+    auto &node = nodeFactory.createVariable(symbol, DriverBitRange(bounds));
+    addPlaceholderDriver(symbol, DriverBitRange(bounds), &node);
+  }
+}
+
+void NetlistBuilder::handle(ast::VariableSymbol const &symbol) {
+  materializeInterfaceMember(symbol);
 }
 
 bool NetlistBuilder::isBlackBoxInstance(
@@ -564,6 +598,10 @@ void NetlistBuilder::handle(ast::ContinuousAssignSymbol const &symbol) {
 }
 
 void NetlistBuilder::handle(ast::NetSymbol const &symbol) {
+  // Nets declared inside an interface are interface members just like
+  // variables; they need boundary nodes for external modport wiring.
+  materializeInterfaceMember(symbol);
+
   // A net declaration assignment is a continuous assignment, but slang
   // keeps the initialiser on the net rather than creating a
   // ContinuousAssignSymbol for it. Synthesise the equivalent assignment

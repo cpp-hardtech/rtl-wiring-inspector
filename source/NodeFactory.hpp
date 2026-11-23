@@ -33,7 +33,7 @@ public:
       -> NetlistNode &;
 
   /// Create a variable node and register it under @p symbol's bounds.
-  auto createVariable(ast::VariableSymbol const &symbol, DriverBitRange bounds)
+  auto createVariable(ast::ValueSymbol const &symbol, DriverBitRange bounds)
       -> NetlistNode &;
 
   /// Create a state node (sequential persistent value) and register it

@@ -120,9 +120,13 @@ void PortConnectionHandler::materializePortNodes(
       builder.canonicalResolver.getCanonicalValueSymbol(valueSymbol);
   auto drivers = builder.analysisManager.getDrivers(driverQuerySymbol);
 
-  // No hints (or feature off) ⇒ one node per driver.
+  // No hints (or feature off) ⇒ one node per driver. Cut points only
+  // refine the bit-aligned resolution path; the legacy whole-expression
+  // walk cannot address the split nodes it produces, so leave the port
+  // node whole when bit resolution is disabled.
   std::vector<uint64_t> const *hints = nullptr;
-  if (builder.options.propCutsAcrossPorts) {
+  if (builder.options.propCutsAcrossPorts &&
+      builder.options.resolveAssignBits) {
     hints = cutRegistry.cutsFor(valueSymbol);
   }
 
@@ -151,7 +155,11 @@ void PortConnectionHandler::materializePortNodes(
     }
     for (auto seg : segments) {
       auto &node = builder.nodeFactory.createPort(symbol, seg);
-      if (driver->isInputPort()) {
+      // Input-side values need a placeholder driver so reads inside the
+      // module resolve to the boundary. An inout port carries both
+      // directions, so it registers one too.
+      if (driver->isInputPort() ||
+          symbol.direction == ast::ArgumentDirection::InOut) {
         builder.addPlaceholderDriver(valueSymbol, seg, &node);
       }
     }
@@ -382,25 +390,42 @@ void PortConnectionHandler::drivePortSegment(Segment const &seg, bool isOutput,
       if (root == nullptr) {
         break;
       }
-      // Map the segment's concat-space range back onto the LSP's own
-      // bounds so the driven range is narrow to what this segment
-      // actually covers, not the full LSP.
-      auto offset = seg.concatLo - src.srcLo;
-      auto segWidth = seg.width();
-      // alignSegments must never emit zero-width segments; `segWidth - 1`
-      // would underflow int32_t.
-      SLANG_ASSERT(segWidth > 0);
-      auto lo = static_cast<int32_t>(path.lspBounds.first + offset);
-      auto hi =
-          static_cast<int32_t>(path.lspBounds.first + offset + segWidth - 1);
-      DriverBitRange mapped{lo, hi};
+      // A non-constant select has no fully static path, so the actual
+      // covers an unknown range of the root; fall back to the whole symbol
+      // rather than mapping the access's width onto the low bits.
+      DriverBitRange mapped;
+      if (!path.isFullyStatic()) {
+        if (path.lsp != nullptr) {
+          mapped = DriverBitRange(path.lspBounds);
+        } else {
+          auto width = root->getType().getSelectableWidth();
+          if (width == 0) {
+            break;
+          }
+          mapped = DriverBitRange{0, static_cast<int32_t>(width) - 1};
+        }
+      } else {
+        // Map the segment's concat-space range back onto the LSP's own
+        // bounds so the driven range is narrow to what this segment
+        // actually covers, not the full LSP.
+        auto offset = seg.concatLo - src.srcLo;
+        auto segWidth = seg.width();
+        // alignSegments must never emit zero-width segments; `segWidth - 1`
+        // would underflow int32_t.
+        SLANG_ASSERT(segWidth > 0);
+        auto lo = static_cast<int32_t>(path.lspBounds.first + offset);
+        auto hi =
+            static_cast<int32_t>(path.lspBounds.first + offset + segWidth - 1);
+        mapped = DriverBitRange{lo, hi};
+      }
+      auto const &lsp = path.lsp != nullptr ? *path.lsp : *path.rootExpr;
       for (auto *portNode : portNodes) {
         if (isOutput) {
-          builder.mergeDrivers(*root, mapped, {DriverInfo(portNode, path.lsp)});
+          builder.mergeDrivers(*root, mapped, {DriverInfo(portNode, &lsp)});
           builder.hookupOutputPort(*root, mapped,
                                    {DriverInfo(portNode, nullptr)});
         } else {
-          builder.addRvalue(evalCtx, *root, *path.lsp, mapped, portNode);
+          builder.addRvalue(evalCtx, *root, lsp, mapped, portNode);
         }
       }
       break;
