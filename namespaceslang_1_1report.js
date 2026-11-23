@@ -1,5 +1,6 @@
 var namespaceslang_1_1report =
 [
+    [ "CanonicalBodyResolver", "classslang_1_1report_1_1CanonicalBodyResolver.html", "classslang_1_1report_1_1CanonicalBodyResolver" ],
     [ "DriverInfo", "structslang_1_1report_1_1DriverInfo.html", "structslang_1_1report_1_1DriverInfo" ],
     [ "ValueInfo", "structslang_1_1report_1_1ValueInfo.html", "structslang_1_1report_1_1ValueInfo" ],
     [ "ReportDrivers", "classslang_1_1report_1_1ReportDrivers.html", "classslang_1_1report_1_1ReportDrivers" ],

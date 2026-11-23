@@ -117,12 +117,16 @@ Protected Member Functions</h2></td></tr>
 <tr class="memitem:a574443a995b85f0ed1fdebf8a5f5cb70" id="r_a574443a995b85f0ed1fdebf8a5f5cb70"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#a574443a995b85f0ed1fdebf8a5f5cb70">locationStr</a> (SourceLocation loc) const -&gt; std::string</td></tr>
 <tr class="memdesc:a574443a995b85f0ed1fdebf8a5f5cb70"><td class="mdescLeft">&#160;</td><td class="mdescRight">Format a source location using the compilation's SourceManager.  <br /></td></tr>
 <tr class="memitem:a5eb3797a657f56547da4e5cedcdde66a" id="r_a5eb3797a657f56547da4e5cedcdde66a"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#a5eb3797a657f56547da4e5cedcdde66a">nameMatches</a> (std::string_view name) const -&gt; bool</td></tr>
+<tr class="memitem:afc4d8620fb3056a48ff3a17433c515d5" id="r_afc4d8620fb3056a48ff3a17433c515d5"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#afc4d8620fb3056a48ff3a17433c515d5">acceptSymbol</a> (ast::Symbol const &amp;symbol, std::string_view path) -&gt; bool</td></tr>
+<tr class="memitem:ab0ebcb87eceb2c43a0c469ab121ac256" id="r_ab0ebcb87eceb2c43a0c469ab121ac256"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#ab0ebcb87eceb2c43a0c469ab121ac256">canonicalValueSymbol</a> (ast::ValueSymbol const &amp;symbol) -&gt; ast::ValueSymbol const &amp;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 id="header-pro-attribs" class="groupheader"><a id="pro-attribs" name="pro-attribs"></a>
 Protected Attributes</h2></td></tr>
 <tr class="memitem:a05dba36af44c116cf9c73b8b441b5245" id="r_a05dba36af44c116cf9c73b8b441b5245"><td class="memItemLeft">ast::Compilation &amp;&#160;</td><td class="memItemRight"><a class="el" href="#a05dba36af44c116cf9c73b8b441b5245">compilation</a></td></tr>
 <tr class="memitem:acd244fb18e0fa12cb235c265e50b8c5b" id="r_acd244fb18e0fa12cb235c265e50b8c5b"><td class="memItemLeft">std::vector&lt; Info &gt;&#160;</td><td class="memItemRight"><a class="el" href="#acd244fb18e0fa12cb235c265e50b8c5b">items</a></td></tr>
 <tr class="memitem:a45c7043af8d3df976d67defa1eb639e6" id="r_a45c7043af8d3df976d67defa1eb639e6"><td class="memItemLeft">std::vector&lt; std::string &gt;&#160;</td><td class="memItemRight"><a class="el" href="#a45c7043af8d3df976d67defa1eb639e6">nameFilters</a></td></tr>
+<tr class="memitem:a08a0aa2fca141bba780c57bbda50442f" id="r_a08a0aa2fca141bba780c57bbda50442f"><td class="memItemLeft"><a class="el" href="classslang_1_1report_1_1CanonicalBodyResolver.html">CanonicalBodyResolver</a>&#160;</td><td class="memItemRight"><a class="el" href="#a08a0aa2fca141bba780c57bbda50442f">canonicalResolver</a></td></tr>
+<tr class="memitem:ab4eb66f5ea51365ea8fc4d10efdb5f9a" id="r_ab4eb66f5ea51365ea8fc4d10efdb5f9a"><td class="memItemLeft">std::unordered_set&lt; const ast::Symbol * &gt;&#160;</td><td class="memItemRight"><a class="el" href="#ab4eb66f5ea51365ea8fc4d10efdb5f9a">reportedSymbols</a></td></tr>
 </table>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><div class="compoundTemplParams">template&lt;typename Derived, typename Info&gt;<br />
@@ -130,7 +134,7 @@ class slang::report::ReportVisitorBase&lt; Derived, Info &gt;</div><p>CRTP base 
 <p>A derived class <code>D</code> with item type <code>Info</code> must provide:</p><ul>
 <li><span class="tt">auto tableHeader() const -&gt; <a class="el" href="structslang_1_1netlist_1_1Utilities.html#a4b0bf762ffe3b344565f5da7e9114e00">netlist::Utilities::Row</a>;</span></li>
 <li><span class="tt">void appendItemRows(<a class="el" href="structslang_1_1netlist_1_1Utilities.html#a014f19e27e6c322676cd55a6cda7877e">netlist::Utilities::Table</a>&amp;, Info const&amp;) const;</span></li>
-<li><span class="tt">void emitJsonItem(JsonWriter&amp;, Info const&amp;) const;</span> and the relevant <span class="tt">handle(...)</span> methods for the AST visitor. Each <span class="tt">handle</span> should consult <span class="tt"><a class="el" href="#a5eb3797a657f56547da4e5cedcdde66a">nameMatches</a>(symbol.getHierarchicalPath())</span> before recording to honour any <span class="tt">--name</span> filters set by the caller. </li>
+<li><span class="tt">void emitJsonItem(JsonWriter&amp;, Info const&amp;) const;</span> and the relevant <span class="tt">handle(...)</span> methods for the AST visitor. Each <span class="tt">handle</span> should call <span class="tt"><a class="el" href="#afc4d8620fb3056a48ff3a17433c515d5">acceptSymbol</a></span> before recording to honour any <span class="tt">--name</span> filters set by the caller and to avoid reporting the same symbol twice when scopes overlap. </li>
 </ul>
 </div><a name="doc-constructors" id="doc-constructors"></a><h2 id="header-doc-constructors" class="groupheader">Constructor &amp; Destructor Documentation</h2>
 <a id="a0f102fb6516ad8b043b617e1b957429c" name="a0f102fb6516ad8b043b617e1b957429c"></a>
@@ -161,6 +165,66 @@ template&lt;typename Derived, typename Info&gt; </div>
 </div>
 </div>
 <a name="doc-func-members" id="doc-func-members"></a><h2 id="header-doc-func-members" class="groupheader">Member Function Documentation</h2>
+<a id="afc4d8620fb3056a48ff3a17433c515d5" name="afc4d8620fb3056a48ff3a17433c515d5"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#afc4d8620fb3056a48ff3a17433c515d5">&#9670;&#160;</a></span>acceptSymbol()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<div class="memtemplate">
+template&lt;typename Derived, typename Info&gt; </div>
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">auto <a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html">slang::report::ReportVisitorBase</a>&lt; Derived, Info &gt;::acceptSymbol </td>
+          <td>(</td>
+          <td class="paramtype">ast::Symbol const &amp;</td>          <td class="paramname"><span class="paramname"><em>symbol</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">std::string_view</td>          <td class="paramname"><span class="paramname"><em>path</em></span>&#160;) -&gt; bool</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel inline">inline</span><span class="mlabel protected">protected</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+<p>Return true if <code class="param">path</code> passes the name filters and <code class="param">symbol</code> has not been recorded yet. Overlapping &ndash;scope selections can visit the same symbol more than once; the first visit wins. </p>
+
+</div>
+</div>
+<a id="ab0ebcb87eceb2c43a0c469ab121ac256" name="ab0ebcb87eceb2c43a0c469ab121ac256"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ab0ebcb87eceb2c43a0c469ab121ac256">&#9670;&#160;</a></span>canonicalValueSymbol()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<div class="memtemplate">
+template&lt;typename Derived, typename Info&gt; </div>
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">auto <a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html">slang::report::ReportVisitorBase</a>&lt; Derived, Info &gt;::canonicalValueSymbol </td>
+          <td>(</td>
+          <td class="paramtype">ast::ValueSymbol const &amp;</td>          <td class="paramname"><span class="paramname"><em>symbol</em></span></td><td>)</td>
+          <td> -&gt; ast::ValueSymbol const &amp;</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel inline">inline</span><span class="mlabel protected">protected</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+<p>Return the symbol that the AnalysisManager stores drivers against for <code class="param">symbol</code>, redirecting symbols in non-canonical instance bodies to their canonical counterparts. </p>
+
+</div>
+</div>
 <a id="a574443a995b85f0ed1fdebf8a5f5cb70" name="a574443a995b85f0ed1fdebf8a5f5cb70"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a574443a995b85f0ed1fdebf8a5f5cb70">&#9670;&#160;</a></span>locationStr()</h2>
 
@@ -305,6 +369,30 @@ template&lt;typename Derived, typename Info&gt; </div>
 </div>
 </div>
 <a name="doc-variable-members" id="doc-variable-members"></a><h2 id="header-doc-variable-members" class="groupheader">Member Data Documentation</h2>
+<a id="a08a0aa2fca141bba780c57bbda50442f" name="a08a0aa2fca141bba780c57bbda50442f"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a08a0aa2fca141bba780c57bbda50442f">&#9670;&#160;</a></span>canonicalResolver</h2>
+
+<div class="memitem">
+<div class="memproto">
+<div class="memtemplate">
+template&lt;typename Derived, typename Info&gt; </div>
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="classslang_1_1report_1_1CanonicalBodyResolver.html">CanonicalBodyResolver</a> <a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html">slang::report::ReportVisitorBase</a>&lt; Derived, Info &gt;::canonicalResolver</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel protected">protected</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
 <a id="a05dba36af44c116cf9c73b8b441b5245" name="a05dba36af44c116cf9c73b8b441b5245"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a05dba36af44c116cf9c73b8b441b5245">&#9670;&#160;</a></span>compilation</h2>
 
@@ -366,6 +454,30 @@ template&lt;typename Derived, typename Info&gt; </div>
       <table class="memname">
         <tr>
           <td class="memname">std::vector&lt;std::string&gt; <a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html">slang::report::ReportVisitorBase</a>&lt; Derived, Info &gt;::nameFilters</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel protected">protected</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+</div>
+</div>
+<a id="ab4eb66f5ea51365ea8fc4d10efdb5f9a" name="ab4eb66f5ea51365ea8fc4d10efdb5f9a"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ab4eb66f5ea51365ea8fc4d10efdb5f9a">&#9670;&#160;</a></span>reportedSymbols</h2>
+
+<div class="memitem">
+<div class="memproto">
+<div class="memtemplate">
+template&lt;typename Derived, typename Info&gt; </div>
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">std::unordered_set&lt;const ast::Symbol *&gt; <a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html">slang::report::ReportVisitorBase</a>&lt; Derived, Info &gt;::reportedSymbols</td>
         </tr>
       </table>
   </td>

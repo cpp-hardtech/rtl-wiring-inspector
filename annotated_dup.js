@@ -36,6 +36,7 @@ var annotated_dup =
         [ "VisitAll", "structslang_1_1netlist_1_1VisitAll.html", "structslang_1_1netlist_1_1VisitAll" ]
       ] ],
       [ "report", "namespaceslang_1_1report.html", [
+        [ "CanonicalBodyResolver", "classslang_1_1report_1_1CanonicalBodyResolver.html", "classslang_1_1report_1_1CanonicalBodyResolver" ],
         [ "DriverInfo", "structslang_1_1report_1_1DriverInfo.html", "structslang_1_1report_1_1DriverInfo" ],
         [ "ValueInfo", "structslang_1_1report_1_1ValueInfo.html", "structslang_1_1report_1_1ValueInfo" ],
         [ "ReportDrivers", "classslang_1_1report_1_1ReportDrivers.html", "classslang_1_1report_1_1ReportDrivers" ],
