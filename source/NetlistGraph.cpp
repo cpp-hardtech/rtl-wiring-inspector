@@ -103,6 +103,34 @@ auto NetlistGraph::lookup(std::string_view name) const -> NetlistNode * {
   return it->second.front();
 }
 
+auto NetlistGraph::lookupAll(std::string_view name) const
+    -> std::vector<NetlistNode *> {
+  buildIndex();
+  auto it = nodeIndex.find(std::string(name));
+  if (it == nodeIndex.end()) {
+    return {};
+  }
+  auto result = it->second;
+  std::ranges::sort(result, {}, [](NetlistNode *node) { return node->ID; });
+  return result;
+}
+
+auto NetlistGraph::hasSymbol(std::string_view name) const -> bool {
+  buildIndex();
+  if (nodeIndex.contains(std::string(name))) {
+    return true;
+  }
+  for (auto const &node : nodes) {
+    for (auto const &edge : node->getOutEdges()) {
+      if (edge->symbol != nullptr &&
+          edge->symbol->hierarchicalPath == name) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 auto NetlistGraph::lookup(std::string_view name, DriverBitRange bounds) const
     -> std::vector<NetlistNode *> {
   buildIndex();
@@ -119,23 +147,128 @@ auto NetlistGraph::lookup(std::string_view name, DriverBitRange bounds) const
   return result;
 }
 
-auto NetlistGraph::getDrivers(std::string_view name,
-                              DriverBitRange bounds) const
-    -> std::vector<NetlistNode *> {
-  std::unordered_set<NetlistNode *> seen;
-  std::vector<NetlistNode *> result;
+namespace {
+
+/// True if @p kind names a declared storage value rather than an operation.
+auto isStorageKind(NodeKind kind) -> bool {
+  return kind == NodeKind::Port || kind == NodeKind::State ||
+         kind == NodeKind::Variable;
+}
+
+} // namespace
+
+auto NetlistGraph::getDriverEntries(std::string_view name,
+                                    DriverBitRange bounds) const
+    -> std::vector<BitDriver> {
+  buildIndex();
+
+  auto const it = nodeIndex.find(std::string(name));
+  bool hasStorageNode = false;
+  if (it != nodeIndex.end()) {
+    for (auto *node : it->second) {
+      if (isStorageKind(node->kind)) {
+        hasStorageNode = true;
+        break;
+      }
+    }
+  }
+
+  std::vector<BitDriver> result;
+
+  // Nodes that write the symbol through an edge into a storage node.
+  std::unordered_set<NetlistNode *> writeSources;
+  if (hasStorageNode) {
+    for (auto const &node : nodes) {
+      for (auto const &edge : node->getOutEdges()) {
+        if (edge->symbol == nullptr || edge->symbol->hierarchicalPath != name) {
+          continue;
+        }
+        if (isStorageKind(edge->getTargetNode().kind)) {
+          writeSources.insert(&edge->getSourceNode());
+        }
+      }
+    }
+  }
+
+  // Edges annotated with the queried symbol. For an internal symbol without
+  // a storage node the writing node is the source of every annotated edge,
+  // so those edges are the only driver provenance. For a declared storage
+  // value, a read edge from a node that also writes the signal repeats a
+  // range its write edge already covers and is dropped.
   for (auto const &node : nodes) {
     for (auto const &edge : node->getOutEdges()) {
       if (edge->symbol == nullptr || edge->symbol->hierarchicalPath != name) {
         continue;
       }
-      if (!edge->bounds.overlaps(bounds)) {
+      auto *source = &edge->getSourceNode();
+      auto *target = &edge->getTargetNode();
+      // A read of the symbol from one of its own storage nodes is not a
+      // driver, even when no write edge exists for the queried range.
+      if (isStorageKind(source->kind)) {
+        auto sourcePath = source->getHierarchicalPath();
+        if (sourcePath && *sourcePath == name) {
+          continue;
+        }
+      }
+      if (hasStorageNode && !isStorageKind(target->kind) &&
+          writeSources.contains(source)) {
         continue;
       }
-      auto *source = &edge->getSourceNode();
-      if (seen.insert(source).second) {
-        result.push_back(source);
+      auto clipped = edge->bounds.intersection(bounds);
+      if (!clipped.has_value()) {
+        continue;
       }
+      result.push_back(BitDriver{*clipped, source});
+    }
+  }
+
+  // Port-connection edges into a same-named Port node are annotated with the
+  // actual symbol, so the write-edge filter above does not reach them. Report
+  // the actual as the driver over the formal port node's own bit range.
+  if (hasStorageNode && it != nodeIndex.end()) {
+    for (auto *portNode : it->second) {
+      if (portNode->kind != NodeKind::Port) {
+        continue;
+      }
+      auto portBounds = portNode->getBounds();
+      auto targetBounds =
+          portBounds ? portBounds->intersection(bounds)
+                     : std::optional<DriverBitRange>(bounds);
+      if (!targetBounds.has_value()) {
+        continue;
+      }
+      for (auto const *edge : portNode->getInEdges()) {
+        if (edge->symbol != nullptr &&
+            edge->symbol->hierarchicalPath == name) {
+          continue;
+        }
+        result.push_back(BitDriver{*targetBounds, &edge->getSourceNode()});
+      }
+    }
+  }
+
+  auto key = [](BitDriver const &b) {
+    return std::make_tuple(b.bounds.lower(), b.bounds.upper(), b.driver);
+  };
+  std::sort(
+      result.begin(), result.end(),
+      [&](BitDriver const &a, BitDriver const &b) { return key(a) < key(b); });
+  result.erase(std::unique(result.begin(), result.end(),
+                           [&](BitDriver const &a, BitDriver const &b) {
+                             return key(a) == key(b);
+                           }),
+               result.end());
+  return result;
+}
+
+auto NetlistGraph::getDrivers(std::string_view name,
+                              DriverBitRange bounds) const
+    -> std::vector<NetlistNode *> {
+  std::unordered_set<NetlistNode *> seen;
+  std::vector<NetlistNode *> result;
+  for (auto const &entry : getDriverEntries(name, bounds)) {
+    if (seen.insert(entry.driver).second) {
+      result.push_back(entry.driver);
     }
   }
   return result;
@@ -157,31 +290,7 @@ auto NetlistGraph::getDrivers(NetlistNode const &node) const
 auto NetlistGraph::getBitDrivers(std::string_view name,
                                  DriverBitRange bounds) const
     -> std::vector<BitDriver> {
-  std::vector<BitDriver> result;
-  for (auto const &node : nodes) {
-    for (auto const &edge : node->getOutEdges()) {
-      if (edge->symbol == nullptr || edge->symbol->hierarchicalPath != name) {
-        continue;
-      }
-      auto clipped = edge->bounds.intersection(bounds);
-      if (!clipped.has_value()) {
-        continue;
-      }
-      result.push_back(BitDriver{*clipped, &edge->getSourceNode()});
-    }
-  }
-  auto key = [](BitDriver const &b) {
-    return std::make_tuple(b.bounds.lower(), b.bounds.upper(), b.driver);
-  };
-  std::sort(
-      result.begin(), result.end(),
-      [&](BitDriver const &a, BitDriver const &b) { return key(a) < key(b); });
-  result.erase(std::unique(result.begin(), result.end(),
-                           [&](BitDriver const &a, BitDriver const &b) {
-                             return key(a) == key(b);
-                           }),
-               result.end());
-  return result;
+  return getDriverEntries(name, bounds);
 }
 
 auto NetlistGraph::getBitDrivers(std::string_view name) const
@@ -348,6 +457,29 @@ auto NetlistGraph::findNodesRegex(std::string_view pattern) const
   for (auto const &[name, nodeList] : nodeIndex) {
     if (std::regex_match(name, re)) {
       result.insert(result.end(), nodeList.begin(), nodeList.end());
+    }
+  }
+  return result;
+}
+
+void NetlistGraph::setBlackBoxPatterns(std::vector<std::string> patterns) {
+  blackBoxPatterns = std::move(patterns);
+  blackBoxPatternMatched.assign(blackBoxPatterns.size(), false);
+}
+
+void NetlistGraph::markBlackBoxPatternMatched(size_t index) {
+  if (index < blackBoxPatternMatched.size()) {
+    blackBoxPatternMatched[index] = true;
+  }
+}
+
+auto NetlistGraph::getUnmatchedBlackBoxPatterns() const
+    -> std::vector<std::string> {
+  std::vector<std::string> result;
+  for (size_t i = 0; i < blackBoxPatterns.size(); ++i) {
+    if (i >= blackBoxPatternMatched.size() ||
+        !blackBoxPatternMatched[i]) {
+      result.push_back(blackBoxPatterns[i]);
     }
   }
   return result;

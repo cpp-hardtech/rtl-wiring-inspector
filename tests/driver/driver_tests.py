@@ -87,6 +87,108 @@ endmodule
 """
 
 
+DRIVERS_PORT_READ_SV = """\
+module m(input logic [3:0] a, output logic [3:0] y, output logic z);
+  assign y = a;
+  assign z = y[0];
+endmodule
+"""
+
+DRIVERS_REG_READ_SV = """\
+module m(input logic clk, input logic d, output logic q, output logic y);
+  logic r;
+  always_ff @(posedge clk) r <= d;
+  assign q = r;
+  assign y = r;
+endmodule
+"""
+
+SPLIT_PORT_SV = """\
+module sub(input logic [1:0] x, output logic [1:0] y);
+  assign y[0] = 1'b0;
+  assign y[1] = x[1];
+endmodule
+module top(input logic a, b, output logic c, d);
+  sub u(.x({b, a}), .y({d, c}));
+endmodule
+"""
+
+# One register written in two halves yields two split State nodes with the
+# same name and location.
+SPLIT_REGISTER_SV = """\
+module top(input logic clk, input logic [3:0] a, input logic [3:0] b,
+           output logic [3:0] x0, output logic [3:0] y0);
+  logic [7:0] r0;
+  always_ff @(posedge clk) r0[3:0] <= a;
+  always_ff @(posedge clk) r0[7:4] <= b;
+  assign x0 = r0[3:0];
+  assign y0 = r0[7:4];
+endmodule
+"""
+
+# One register assigned per bit in a single block splits into two State nodes.
+SPLIT_STATE_SV = """\
+module top(input logic clk, input logic a, input logic b,
+           output logic [1:0] q, output logic y);
+  always_ff @(posedge clk) begin
+    q[0] <= a;
+    q[1] <= b;
+  end
+  assign y = q[1];
+endmodule
+"""
+
+# A submodule output port and its internal State share the name top.u.q; the
+# port fans out to a register clocked by clk2.
+SENSITIVITY_SPLIT_SV = """\
+module sub(input logic clk1, input logic d, output logic q);
+  always_ff @(posedge clk1) q <= d;
+endmodule
+module top(input logic clk1, input logic clk2, input logic d,
+           output logic r);
+  logic q;
+  sub u(.clk1(clk1), .d(d), .q(q));
+  always_ff @(posedge clk2) r <= q;
+endmodule
+"""
+
+PRIORITY_SV = """\
+module m(input logic a, input logic b, output logic x, output logic y);
+  assign x = a;
+  assign y = b;
+endmodule
+"""
+
+INOUT_SV = """\
+module bbx(inout wire [3:0] p);
+  assign p = 4'h0;
+endmodule
+module top(inout wire [3:0] io, output logic [3:0] q);
+  bbx u (.p(io));
+  assign q = io;
+endmodule
+"""
+
+BLACKBOX_SV = """\
+module sub(input logic a, output logic y);
+  logic t;
+  assign t = ~a;
+  assign y = t;
+endmodule
+module top(input logic i, output logic o);
+  sub u(.a(i), .y(o));
+endmodule
+"""
+
+# No procedural or continuous blocks: the build defers zero blocks.
+ZERO_DEFERRED_SV = """\
+module leaf(input logic a, output logic b);
+endmodule
+module top(input logic a);
+  leaf u(.a(a));
+endmodule
+"""
+
 class DriverTests(unittest.TestCase):
     executable = ...
 
@@ -142,9 +244,9 @@ class DriverTests(unittest.TestCase):
         return netlist
 
     @staticmethod
-    def _parse_stats(stdout):
-        """Extract and parse the JSON stats line from stdout."""
-        for line in stdout.splitlines():
+    def _parse_stats(output):
+        """Extract and parse the JSON stats line from a captured stream."""
+        for line in output.splitlines():
             line = line.strip()
             if line.startswith("{") and "time_seconds" in line:
                 return json.loads(line)
@@ -267,7 +369,7 @@ comb-loop.sv:10:10: note: assignment
 
     def test_stats_json_full_build(self):
         r = self.run_tool("rca.sv", "--report-registers", "--stats-json")
-        stats = self._parse_stats(r.stdout)
+        stats = self._parse_stats(r.stderr)
         self.assertIsNotNone(stats)
         times = stats["time_seconds"]
         for phase in ("parsing", "elaboration", "analysis", "netlist"):
@@ -275,13 +377,17 @@ comb-loop.sv:10:10: note: assignment
             self.assertGreater(times[phase], 0)
         self.assertIsInstance(stats["peak_rss_bytes"], int)
         self.assertGreater(stats["peak_rss_bytes"], 0)
-        # Register output should still be present.
+        self.assertEqual(stats["graph_source"], "built")
+        # Register output should still be present, and stdout must stay free
+        # of statistics.
         self.assertIn("rca.sum_q", r.stdout)
+        self.assertIsNone(self._parse_stats(r.stdout))
 
     def test_stats_json_not_present_without_flag(self):
         """Stats JSON is not emitted when --stats-json is not specified."""
         r = self.run_tool("rca.sv", "--report-registers")
         self.assertIsNone(self._parse_stats(r.stdout))
+        self.assertIsNone(self._parse_stats(r.stderr))
 
     def test_find_wildcard(self):
         r = self.run_tool("rca.sv", "--find", "rca.i_*")
@@ -546,6 +652,332 @@ comb-loop.sv:10:10: note: assignment
         self.assertIn("port a", r.stdout)
         self.assertIn("port x", r.stdout)
         self.assertNotIn("port y", r.stdout)
+
+
+    def test_drivers_read_edge_is_not_a_driver(self):
+        # Reading an output port annotates the edge with the port name, but
+        # that edge is not a driver of the port itself.
+        r = self.run_tool("--drivers", "m.y", source=DRIVERS_PORT_READ_SV)
+        self.assertIn("[3:0]", r.stdout)
+        self.assertIn("assignment", r.stdout)
+        self.assertNotIn("output port m.y", r.stdout)
+        rows = [line for line in r.stdout.splitlines()[1:] if line.strip()]
+        self.assertEqual(len(rows), 1)
+
+    def test_drivers_register_read_edge_is_not_a_driver(self):
+        # A register read by other logic must not be reported as its own
+        # driver.
+        r = self.run_tool("--drivers", "m.r", source=DRIVERS_REG_READ_SV)
+        self.assertIn("assignment", r.stdout)
+        self.assertNotIn("register m.r", r.stdout)
+
+    def test_drivers_register_json_has_no_self_row(self):
+        r = self.run_tool(
+            "--drivers", "m.r", "--format", "json", source=DRIVERS_REG_READ_SV
+        )
+        data = json.loads(r.stdout)
+        self.assertTrue(data)
+        self.assertTrue(all(entry["driver"] != "register m.r" for entry in data))
+
+    def test_drivers_internal_signal(self):
+        # An internal wire/reg has no node of its own but its drivers are
+        # recorded on the annotated edges.
+        r = self.run_tool("rca.sv", "--drivers", "rca.carry")
+        self.assertIn("assignment", r.stdout)
+        self.assertIn("[0]", r.stdout)
+        self.assertIn("[7]", r.stdout)
+
+    def test_drivers_internal_signal_bit_range(self):
+        r = self.run_tool("rca.sv", "--drivers", "rca.carry[3]")
+        self.assertIn("[3]", r.stdout)
+        self.assertNotIn("[0]", r.stdout)
+
+    def test_split_port_path(self):
+        # The two split nodes of x have to be tried as path starts.
+        r = self.run_tool(
+            "--from", "top.u.x", "--to", "top.u.y", "--no-colours",
+            source=SPLIT_PORT_SV,
+        )
+        self.assertIn("input port x", r.stdout)
+        self.assertIn("output port y", r.stdout)
+
+    def test_split_port_fan_out_union(self):
+        r = self.run_tool("--fan-out", "top.u.x", source=SPLIT_PORT_SV)
+        self.assertIn("top.d", r.stdout)
+        self.assertNotIn("top.c", r.stdout)
+
+    def test_split_port_fan_in_union(self):
+        r = self.run_tool("--fan-in", "top.u.y", source=SPLIT_PORT_SV)
+        self.assertIn("top.b", r.stdout)
+        self.assertNotIn("top.a", r.stdout)
+
+    def test_split_port_cones_are_not_duplicated(self):
+        # A split signal contributes once per name, not once per node.
+        r = self.run_tool("--fan-out", "top.u.x", source=SPLIT_PORT_SV)
+        rows = [line for line in r.stdout.splitlines()[1:] if line.strip()]
+        self.assertEqual(len(rows), len(set(rows)))
+
+    def test_split_register_path_is_stable_across_threads(self):
+        for threads in ("1", "2", "8"):
+            r = self.run_tool(
+                "-j", threads, "--from", "top.r0", "--to", "top.y0",
+                "--no-colours", source=SPLIT_REGISTER_SV,
+            )
+            self.assertIn("top.y0", r.stdout)
+
+    def test_find_dedupes_split_nodes(self):
+        r = self.run_tool("--find", "top.u.x*", source=SPLIT_PORT_SV)
+        rows = [line for line in r.stdout.splitlines()[1:] if line.strip()]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("top.u.x", rows[0])
+
+    def test_find_json_dedupes_split_nodes(self):
+        r = self.run_tool(
+            "--find", "top.u.x*", "--format", "json", source=SPLIT_PORT_SV
+        )
+        data = json.loads(r.stdout)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["name"], "top.u.x")
+
+    def test_report_registers_dedupes_split_state(self):
+        r = self.run_tool("--report-registers", source=SPLIT_STATE_SV)
+        rows = [line for line in r.stdout.splitlines()[1:] if line.strip()]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("top.q", rows[0])
+
+    def test_sensitivity_prefers_state_over_same_named_port(self):
+        # top.u.q is both the submodule output port and the register State.
+        # Only the register's own clock edge belongs to the answer; the port
+        # fans out into the top-level register clocked by clk2.
+        r = self.run_tool(
+            "--sensitivity", "top.u.q", source=SENSITIVITY_SPLIT_SV
+        )
+        self.assertIn("top.u.clk1", r.stdout)
+        self.assertNotIn("top.clk2", r.stdout)
+
+    def test_from_with_explicit_fan_in(self):
+        # An explicit --fan-in wins over aliasing --from to a fan-out.
+        path = self._write_sv(PRIORITY_SV)
+        expected = self.run_tool(path, "--fan-in", "m.y").stdout
+        r = self.run_tool(path, "--from", "m.a", "--fan-in", "m.y")
+        self.assertEqual(set(r.stdout.splitlines()), set(expected.splitlines()))
+        self.assertNotIn("m.x", r.stdout)
+
+    def test_to_with_explicit_fan_out(self):
+        path = self._write_sv(PRIORITY_SV)
+        expected = self.run_tool(path, "--fan-out", "m.a").stdout
+        r = self.run_tool(path, "--to", "m.y", "--fan-out", "m.a")
+        self.assertEqual(set(r.stdout.splitlines()), set(expected.splitlines()))
+
+    def test_save_netlist_write_failure(self):
+        path = "/nonexistent-dir-xyz/out.json"
+        r = self.run_tool("rca.sv", "--save-netlist", path, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("could not write file", r.stderr)
+        self.assertIn(path, r.stderr)
+        self.assertNotIn("basic_ios", r.stderr)
+
+    def test_output_write_failure(self):
+        path = "/nonexistent-dir-xyz/out.txt"
+        r = self.run_tool(
+            "rca.sv", "--report-registers", "-o", path, check=False
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("could not write file", r.stderr)
+        self.assertIn(path, r.stderr)
+        self.assertNotIn("basic_ios", r.stderr)
+
+    def test_redirected_output_has_no_colours(self):
+        # subprocess captures stdout through a pipe, so the default must not
+        # emit ANSI escapes.
+        r = self.run_tool(
+            "rca.sv", "--from", "rca.i_op0", "--to", "rca.o_sum"
+        )
+        self.assertNotIn("\x1b[", r.stdout)
+
+    def test_explicit_colour_forces_ansi(self):
+        r = self.run_tool(
+            "rca.sv", "--from", "rca.i_op0", "--to", "rca.o_sum", "--colour"
+        )
+        self.assertIn("\x1b[", r.stdout)
+
+    def test_inout_port_path_report(self):
+        r = self.run_tool(
+            "--from", "top.u.p", "--to", "top.q", "--no-colours",
+            source=INOUT_SV,
+        )
+        self.assertIn("note: inout port p", r.stdout)
+
+    def test_inout_port_path_report_loaded_netlist(self):
+        with self.temp_path(".json") as netlist:
+            self.run_tool("--save-netlist", netlist, source=INOUT_SV)
+            r = self.run_tool(
+                "--load-netlist", netlist, "--from", "top.u.p", "--to",
+                "top.q", "--no-colours",
+            )
+        self.assertIn("note: inout port p", r.stdout)
+        self.assertIn("note: output port q", r.stdout)
+
+    def test_path_format_json(self):
+        r = self.run_tool(
+            "rca.sv", "--from", "rca.i_op0", "--to", "rca.o_sum",
+            "--format", "json",
+        )
+        steps = json.loads(r.stdout)
+        nodes = [step for step in steps if step["type"] == "node"]
+        edges = [step for step in steps if step["type"] == "edge"]
+        self.assertEqual(steps[0]["type"], "node")
+        self.assertEqual(steps[-1]["type"], "node")
+        self.assertEqual(len(edges), len(nodes) - 1)
+        self.assertEqual(nodes[0]["path"], "rca.i_op0")
+        self.assertEqual(nodes[-1]["path"], "rca.o_sum")
+        for node in nodes:
+            self.assertEqual(
+                set(node), {"type", "node_kind", "name", "path", "location"}
+            )
+        for edge in edges:
+            self.assertEqual(
+                set(edge), {"type", "symbol_path", "bits", "edge_kind"}
+            )
+
+    def test_path_format_json_output_file(self):
+        with self.temp_path(".json") as outfile:
+            self.run_tool(
+                "rca.sv", "--from", "rca.i_op0", "--to", "rca.o_sum",
+                "--format", "json", "-o", outfile,
+            )
+            with open(outfile) as f:
+                steps = json.load(f)
+        self.assertEqual(steps[0]["path"], "rca.i_op0")
+        self.assertEqual(steps[-1]["path"], "rca.o_sum")
+
+    def test_path_format_json_loaded_netlist_location(self):
+        with self.temp_path(".json") as netlist:
+            self.run_tool("rca.sv", "--save-netlist", netlist)
+            r = self.run_tool(
+                "--load-netlist", netlist, "--from", "rca.i_op0", "--to",
+                "rca.o_sum", "--format", "json",
+            )
+        steps = json.loads(r.stdout)
+        first = steps[0]
+        self.assertEqual(first["path"], "rca.i_op0")
+        self.assertRegex(first["location"], r"^rca\.sv:\d+:\d+$")
+
+    def test_comb_loops_format_json(self):
+        r = self.run_tool("comb-loop.sv", "--comb-loops", "--format", "json")
+        loops = json.loads(r.stdout)
+        self.assertEqual(len(loops), 1)
+        loop = loops[0]
+        self.assertEqual(set(loop), {"length", "nodes", "edges"})
+        self.assertEqual(loop["length"], len(loop["nodes"]))
+        # A cycle lists the closing edge as well.
+        self.assertEqual(len(loop["edges"]), len(loop["nodes"]))
+        for step in loop["nodes"]:
+            self.assertEqual(step["type"], "node")
+        for step in loop["edges"]:
+            self.assertEqual(step["type"], "edge")
+
+    def test_comb_loops_format_json_no_loops(self):
+        r = self.run_tool("rca.sv", "--comb-loops", "--format", "json")
+        self.assertEqual(json.loads(r.stdout), [])
+
+    def test_comb_loops_json_scope_filter(self):
+        r = self.run_tool(
+            "comb-loop.sv", "--comb-loops", "--format", "json",
+            "--scope", "m.t",
+        )
+        self.assertEqual(len(json.loads(r.stdout)), 1)
+        r = self.run_tool(
+            "comb-loop.sv", "--comb-loops", "--format", "json",
+            "--scope", "m.nonexistent",
+        )
+        self.assertEqual(json.loads(r.stdout), [])
+
+    def test_comb_loops_json_output_file(self):
+        with self.temp_path(".json") as outfile:
+            self.run_tool(
+                "comb-loop.sv", "--comb-loops", "--format", "json", "-o",
+                outfile,
+            )
+            with open(outfile) as f:
+                loops = json.load(f)
+        self.assertEqual(len(loops), 1)
+
+    def test_stats_alone_is_an_action(self):
+        r = self.run_tool("rca.sv", "--stats")
+        self.assertEqual(r.stdout, "")
+        self.assertIn("Phase Timing", r.stderr)
+
+    def test_stats_json_alone_is_an_action(self):
+        r = self.run_tool("rca.sv", "--stats-json")
+        self.assertEqual(r.stdout, "")
+        stats = self._parse_stats(r.stderr)
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["graph_source"], "built")
+
+    def test_stats_json_loaded_netlist(self):
+        with self.temp_path(".json") as netlist:
+            self.run_tool("rca.sv", "--save-netlist", netlist)
+            r = self.run_tool(
+                "--load-netlist", netlist, "--report-registers", "--stats-json"
+            )
+        stats = self._parse_stats(r.stderr)
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["graph_source"], "loaded")
+        self.assertIn("load", stats["time_seconds"])
+        self.assertGreater(stats["time_seconds"]["load"], 0)
+        self.assertNotIn("netlist_profile", stats)
+        self.assertIn("rca.sum_q", r.stdout)
+        self.assertIsNone(self._parse_stats(r.stdout))
+
+    def test_stats_human_zero_deferred_blocks(self):
+        r = self.run_tool(
+            "--report-registers", "--stats", source=ZERO_DEFERRED_SV
+        )
+        self.assertIn("Netlist Build", r.stderr)
+        self.assertNotIn("DFA Tasks", r.stderr)
+
+    def test_blackbox_zero_match_warns(self):
+        baseline = self.run_tool("rca.sv", "--report-registers").stdout
+        r = self.run_tool(
+            "rca.sv", "--black-box", "NOMATCH_XYZ", "--report-registers"
+        )
+        self.assertIn("matched no instances", r.stderr)
+        self.assertIn("NOMATCH_XYZ", r.stderr)
+        # A zero-match pattern does not change the netlist.
+        self.assertEqual(r.stdout, baseline)
+
+    def test_blackbox_stats_json(self):
+        r = self.run_tool(
+            "--black-box", "sub", "--report-registers", "--stats-json",
+            source=BLACKBOX_SV,
+        )
+        stats = self._parse_stats(r.stderr)
+        self.assertIsNotNone(stats)
+        black_boxes = stats["black_boxes"]
+        self.assertEqual(black_boxes["patterns"], ["sub"])
+        self.assertEqual(black_boxes["matched_paths"], ["top.u"])
+        self.assertEqual(black_boxes["unmatched_patterns"], [])
+
+    def test_blackbox_zero_match_stats_json(self):
+        r = self.run_tool(
+            "--black-box", "NOMATCH_XYZ", "--report-registers", "--stats-json",
+            source=BLACKBOX_SV,
+        )
+        stats = self._parse_stats(r.stderr)
+        self.assertIsNotNone(stats)
+        black_boxes = stats["black_boxes"]
+        self.assertEqual(black_boxes["patterns"], ["NOMATCH_XYZ"])
+        self.assertEqual(black_boxes["matched_paths"], [])
+        self.assertEqual(black_boxes["unmatched_patterns"], ["NOMATCH_XYZ"])
+
+    def test_blackbox_stats_human_lists_matched_paths(self):
+        r = self.run_tool(
+            "--black-box", "sub", "--report-registers", "--stats",
+            source=BLACKBOX_SV,
+        )
+        self.assertIn("Black boxes: 1 matched path", r.stderr)
+        self.assertIn("top.u", r.stderr)
 
 
 if __name__ == "__main__":

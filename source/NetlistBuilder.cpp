@@ -82,7 +82,12 @@ auto NetlistBuilder::toSymbolRef(ast::Symbol const &sym) const
   return ref;
 }
 
-void NetlistBuilder::build(const ast::Symbol &root) { pipeline.run(root); }
+void NetlistBuilder::build(const ast::Symbol &root) {
+  // Remember the requested patterns so matched and unmatched ones can be
+  // reported after the build.
+  graph.setBlackBoxPatterns(options.blackBoxes);
+  pipeline.run(root);
+}
 
 void NetlistBuilder::finalize() { pipeline.finalize(); }
 
@@ -522,19 +527,22 @@ bool NetlistBuilder::isBlackBoxInstance(
   if (options.blackBoxes.empty()) {
     return false;
   }
+  bool matched = false;
   auto const defName = std::string(symbol.getDefinition().name);
-  for (auto const &pattern : options.blackBoxes) {
-    if (wildcardMatch(defName.c_str(), pattern.c_str())) {
-      return true;
+  for (size_t i = 0; i < options.blackBoxes.size(); ++i) {
+    if (wildcardMatch(defName.c_str(), options.blackBoxes[i].c_str())) {
+      graph.markBlackBoxPatternMatched(i);
+      matched = true;
     }
   }
   auto const path = symbol.getHierarchicalPath();
-  for (auto const &pattern : options.blackBoxes) {
-    if (wildcardMatch(path.c_str(), pattern.c_str())) {
-      return true;
+  for (size_t i = 0; i < options.blackBoxes.size(); ++i) {
+    if (wildcardMatch(path.c_str(), options.blackBoxes[i].c_str())) {
+      graph.markBlackBoxPatternMatched(i);
+      matched = true;
     }
   }
-  return false;
+  return matched;
 }
 
 void NetlistBuilder::handle(ast::InstanceSymbol const &symbol) {

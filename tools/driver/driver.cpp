@@ -24,11 +24,15 @@
 #include "fmt/color.h"
 #include "fmt/format.h"
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <charconv>
 #include <chrono>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
+#include <system_error>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -77,6 +81,10 @@ void reportNodeDiag(NetlistDiagnostics &diagnostics, NetlistNode const &node) {
       diagnostics.issue(diagnostic);
     } else if (port.isOutput()) {
       Diagnostic diagnostic(diag::OutputPort, srcLoc);
+      diagnostic << port.name;
+      diagnostics.issue(diagnostic);
+    } else if (port.direction == ast::ArgumentDirection::InOut) {
+      Diagnostic diagnostic(diag::InOutPort, srcLoc);
       diagnostic << port.name;
       diagnostics.issue(diagnostic);
     } else {
@@ -136,6 +144,8 @@ void reportNodeText(netlist::FormatBuffer &buffer, FileTable const &fileTable,
       buffer.format("{}: note: input port {}\n", loc, port.name);
     } else if (port.isOutput()) {
       buffer.format("{}: note: output port {}\n", loc, port.name);
+    } else if (port.direction == ast::ArgumentDirection::InOut) {
+      buffer.format("{}: note: inout port {}\n", loc, port.name);
     } else {
       SLANG_UNREACHABLE;
     }
@@ -246,8 +256,13 @@ auto main(int argc, char **argv) -> int {
 
   std::optional<bool> noColours;
   driver.cmdLine.add("--no-colours", noColours,
-                     "Disable colored output (default is enabled on terminals "
-                     "that support it)");
+                     "Disable colored output (default is enabled only when "
+                     "stdout is a terminal that supports it)");
+
+  std::optional<bool> colour;
+  driver.cmdLine.add("--colour", colour,
+                     "Force colored output even when stdout is not a "
+                     "terminal (--no-colours still takes precedence)");
 
   std::optional<bool> quiet;
   driver.cmdLine.add("-q,--quiet", quiet, "Suppress non-essential output");
@@ -259,7 +274,7 @@ auto main(int argc, char **argv) -> int {
 
   std::optional<bool> statsJson;
   driver.cmdLine.add("--stats-json", statsJson,
-                     "Print execution statistics as JSON to stdout");
+                     "Print execution statistics as JSON to stderr");
 
   std::optional<bool> debug;
   driver.cmdLine.add("-d,--debug", debug, "Output debugging information");
@@ -460,12 +475,189 @@ auto main(int argc, char **argv) -> int {
     }
   }
 
+  // Colours are enabled only when stdout is an interactive terminal unless
+  // an explicit flag says otherwise.
+  bool useColours = false;
+  if (noColours == true) {
+    useColours = false;
+  } else if (colour == true) {
+    useColours = true;
+  } else {
+    useColours = OS::fileSupportsColors(stdout);
+  }
+
+  // Write file contents, turning a stream failure into an error that names
+  // the target instead of leaking an iostream failure message.
+  auto writeFile = [](std::string const &path, std::string_view content) {
+    if (path == "-") {
+      OS::print(content);
+      return;
+    }
+    errno = 0;
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file.is_open()) {
+      auto error = std::error_code(errno, std::generic_category());
+      SLANG_THROW(std::runtime_error(
+          fmt::format("could not write file '{}': {}", path,
+                      error.message())));
+    }
+    file.write(content.data(), static_cast<std::streamsize>(content.size()));
+    file.close();
+    if (file.fail()) {
+      SLANG_THROW(std::runtime_error(
+          fmt::format("could not write file '{}': write failed", path)));
+    }
+  };
+
   auto writeOutput = [&](std::string_view content) {
     if (outputFile && *outputFile != "-") {
-      OS::writeFile(*outputFile, content);
+      writeFile(*outputFile, content);
     } else {
       OS::print(content);
     }
+  };
+
+  auto nodeKindName = [](NodeKind kind) -> std::string_view {
+    switch (kind) {
+    case NodeKind::Port:
+      return "Port";
+    case NodeKind::Variable:
+      return "Variable";
+    case NodeKind::Assignment:
+      return "Assignment";
+    case NodeKind::Conditional:
+      return "Conditional";
+    case NodeKind::Case:
+      return "Case";
+    case NodeKind::Merge:
+      return "Merge";
+    case NodeKind::State:
+      return "State";
+    case NodeKind::Constant:
+      return "Constant";
+    case NodeKind::Operation:
+      return "Operation";
+    default:
+      return "None";
+    }
+  };
+
+  auto edgeKindName = [](ast::EdgeKind kind) -> std::string_view {
+    switch (kind) {
+    case ast::EdgeKind::PosEdge:
+      return "PosEdge";
+    case ast::EdgeKind::NegEdge:
+      return "NegEdge";
+    case ast::EdgeKind::BothEdges:
+      return "BothEdges";
+    default:
+      return "None";
+    }
+  };
+
+  // Append one node step of the path/loop JSON representation.
+  auto writeNodeStep = [&](JsonWriter &writer, NetlistNode const &node,
+                           FileTable const &fileTable) {
+    writer.startObject();
+    writer.writeProperty("type");
+    writer.writeValue(std::string_view("node"));
+    writer.writeProperty("node_kind");
+    writer.writeValue(nodeKindName(node.kind));
+    writer.writeProperty("name");
+    switch (node.kind) {
+    case NodeKind::Port:
+      writer.writeValue(node.as<Port>().name);
+      break;
+    case NodeKind::State:
+      writer.writeValue(node.as<State>().name);
+      break;
+    case NodeKind::Variable:
+      writer.writeValue(node.as<Variable>().name);
+      break;
+    default:
+      writer.writeValue(std::string_view{});
+      break;
+    }
+    writer.writeProperty("path");
+    auto path = node.getHierarchicalPath();
+    writer.writeValue(path ? *path : std::string_view{});
+    writer.writeProperty("location");
+    auto location = node.getLocation();
+    auto locationText =
+        location ? location->toString(fileTable) : std::string();
+    writer.writeValue(locationText);
+    writer.endObject();
+  };
+
+  // Append one edge step of the path/loop JSON representation.
+  auto writeEdgeStep = [&](JsonWriter &writer, NetlistEdge const &edge) {
+    writer.startObject();
+    writer.writeProperty("type");
+    writer.writeValue(std::string_view("edge"));
+    writer.writeProperty("symbol_path");
+    writer.writeValue(edge.symbol
+                          ? std::string_view(edge.symbol->hierarchicalPath)
+                          : std::string_view{});
+    writer.writeProperty("bits");
+    writer.writeValue(toString(edge.bounds));
+    writer.writeProperty("edge_kind");
+    writer.writeValue(edgeKindName(edge.edgeKind));
+    writer.endObject();
+  };
+
+  // Serialize a path as an alternating node/edge step array. The number of
+  // edge steps is one less than the number of node steps.
+  auto pathToJson = [&](NetlistPath const &path,
+                        FileTable const &fileTable) -> std::string {
+    JsonWriter writer;
+    writer.setPrettyPrint(true);
+    writer.startArray();
+    for (size_t i = 0; i < path.size(); ++i) {
+      writeNodeStep(writer, *path[i], fileTable);
+      if (i + 1 < path.size()) {
+        auto edgeIt = path[i]->findEdgeTo(*path[i + 1]);
+        SLANG_ASSERT(edgeIt != path[i]->end() &&
+                     "edge between nodes not found in path");
+        writeEdgeStep(writer, **edgeIt);
+      }
+    }
+    writer.endArray();
+    return fmt::format("{}\n", writer.view());
+  };
+
+  // Serialize detected loops. Each entry lists the cycle's nodes and the
+  // edges connecting consecutive nodes, including the closing edge.
+  auto loopsToJson = [&](
+      std::vector<std::vector<NetlistNode const *>> const &cycles,
+      FileTable const &fileTable) -> std::string {
+    JsonWriter writer;
+    writer.setPrettyPrint(true);
+    writer.startArray();
+    for (auto const &cycle : cycles) {
+      writer.startObject();
+      writer.writeProperty("length");
+      writer.writeValue(static_cast<int64_t>(cycle.size()));
+      writer.writeProperty("nodes");
+      writer.startArray();
+      for (auto const *node : cycle) {
+        writeNodeStep(writer, *node, fileTable);
+      }
+      writer.endArray();
+      writer.writeProperty("edges");
+      writer.startArray();
+      for (size_t i = 0; i < cycle.size(); ++i) {
+        auto const *from = cycle[i];
+        auto const *to = cycle[(i + 1) % cycle.size()];
+        auto edgeIt = from->findEdgeTo(*to);
+        SLANG_ASSERT(edgeIt != from->end() &&
+                     "edge between cycle nodes not found");
+        writeEdgeStep(writer, **edgeIt);
+      }
+      writer.endArray();
+      writer.endObject();
+    }
+    writer.endArray();
+    return fmt::format("{}\n", writer.view());
   };
 
   // Emit a table either as a formatted text table or as a JSON array of
@@ -604,6 +796,7 @@ auto main(int argc, char **argv) -> int {
 
   // Pointer to the graph, set once it's constructed, for printStats access.
   NetlistGraph *graphPtr = nullptr;
+  bool graphLoaded = false;
 
   auto printStatsJson = [&] {
     auto peakRSS = OS::getPeakMemoryBytes();
@@ -620,56 +813,84 @@ auto main(int argc, char **argv) -> int {
     writer.writeValue(peakRSS);
 
     if (graphPtr) {
+      writer.writeProperty("graph_source");
+      writer.writeValue(graphLoaded ? std::string_view("loaded")
+                                     : std::string_view("built"));
       writer.writeProperty("graph_nodes");
       writer.writeValue(static_cast<int64_t>(graphPtr->numNodes()));
       writer.writeProperty("graph_edges");
       writer.writeValue(static_cast<int64_t>(graphPtr->numEdges()));
 
-      auto const &bp = graphPtr->getBuildProfile();
-      writer.writeProperty("netlist_profile");
+      // Build phasing is only meaningful for a freshly built graph.
+      if (!graphLoaded) {
+        auto const &bp = graphPtr->getBuildProfile();
+        writer.writeProperty("netlist_profile");
+        writer.startObject();
+
+        writer.writeProperty("phase1_collect_seconds");
+        writer.writeValue(bp.phase1_collectSeconds);
+        writer.writeProperty("phase2_parallel_seconds");
+        writer.writeValue(bp.phase2_parallelSeconds);
+        writer.writeProperty("phase3_drain_seconds");
+        writer.writeValue(bp.phase3_drainSeconds);
+        writer.writeProperty("phase4_rvalue_seconds");
+        writer.writeValue(bp.phase4_rvalueSeconds);
+        writer.writeProperty("phase5_merge_edges_seconds");
+        writer.writeValue(bp.phase5_mergeEdgesSeconds);
+
+        writer.writeProperty("drain_pending_rvalues_seconds");
+        writer.writeValue(bp.drain_pendingRValuesSeconds);
+        writer.writeProperty("drain_merges_seconds");
+        writer.writeValue(bp.drain_mergesSeconds);
+
+        writer.writeProperty("deferred_block_count");
+        writer.writeValue(static_cast<int64_t>(bp.deferredBlockCount));
+        writer.writeProperty("deferred_pending_rvalue_count");
+        writer.writeValue(static_cast<int64_t>(bp.deferredPendingRValueCount));
+
+        writer.writeProperty("task_min_seconds");
+        writer.writeValue(bp.taskMinSeconds);
+        writer.writeProperty("task_max_seconds");
+        writer.writeValue(bp.taskMaxSeconds);
+        writer.writeProperty("task_mean_seconds");
+        writer.writeValue(bp.taskMeanSeconds);
+        writer.writeProperty("task_median_seconds");
+        writer.writeValue(bp.taskMedianSeconds);
+        writer.writeProperty("task_total_seconds");
+        writer.writeValue(bp.taskTotalSeconds);
+        writer.writeProperty("task_cpu_total_seconds");
+        writer.writeValue(bp.taskCpuTotalSeconds);
+        writer.writeProperty("num_threads");
+        writer.writeValue(static_cast<int64_t>(bp.numThreads));
+
+        writer.endObject();
+      }
+
+      writer.writeProperty("black_boxes");
       writer.startObject();
-
-      writer.writeProperty("phase1_collect_seconds");
-      writer.writeValue(bp.phase1_collectSeconds);
-      writer.writeProperty("phase2_parallel_seconds");
-      writer.writeValue(bp.phase2_parallelSeconds);
-      writer.writeProperty("phase3_drain_seconds");
-      writer.writeValue(bp.phase3_drainSeconds);
-      writer.writeProperty("phase4_rvalue_seconds");
-      writer.writeValue(bp.phase4_rvalueSeconds);
-      writer.writeProperty("phase5_merge_edges_seconds");
-      writer.writeValue(bp.phase5_mergeEdgesSeconds);
-
-      writer.writeProperty("drain_pending_rvalues_seconds");
-      writer.writeValue(bp.drain_pendingRValuesSeconds);
-      writer.writeProperty("drain_merges_seconds");
-      writer.writeValue(bp.drain_mergesSeconds);
-
-      writer.writeProperty("deferred_block_count");
-      writer.writeValue(static_cast<int64_t>(bp.deferredBlockCount));
-      writer.writeProperty("deferred_pending_rvalue_count");
-      writer.writeValue(static_cast<int64_t>(bp.deferredPendingRValueCount));
-
-      writer.writeProperty("task_min_seconds");
-      writer.writeValue(bp.taskMinSeconds);
-      writer.writeProperty("task_max_seconds");
-      writer.writeValue(bp.taskMaxSeconds);
-      writer.writeProperty("task_mean_seconds");
-      writer.writeValue(bp.taskMeanSeconds);
-      writer.writeProperty("task_median_seconds");
-      writer.writeValue(bp.taskMedianSeconds);
-      writer.writeProperty("task_total_seconds");
-      writer.writeValue(bp.taskTotalSeconds);
-      writer.writeProperty("task_cpu_total_seconds");
-      writer.writeValue(bp.taskCpuTotalSeconds);
-      writer.writeProperty("num_threads");
-      writer.writeValue(static_cast<int64_t>(bp.numThreads));
-
+      writer.writeProperty("patterns");
+      writer.startArray();
+      for (auto const &pattern : graphPtr->getBlackBoxPatterns()) {
+        writer.writeValue(pattern);
+      }
+      writer.endArray();
+      writer.writeProperty("matched_paths");
+      writer.startArray();
+      for (auto const &path : graphPtr->getBlackBoxPaths()) {
+        writer.writeValue(path);
+      }
+      writer.endArray();
+      writer.writeProperty("unmatched_patterns");
+      writer.startArray();
+      for (auto const &pattern : graphPtr->getUnmatchedBlackBoxPatterns()) {
+        writer.writeValue(pattern);
+      }
+      writer.endArray();
       writer.endObject();
     }
 
     writer.endObject();
-    OS::print(fmt::format("{}\n", writer.view()));
+    OS::printE(fmt::format("{}\n", writer.view()));
   };
 
   auto printStatsHuman = [&] {
@@ -691,7 +912,7 @@ auto main(int argc, char **argv) -> int {
     phaseRows.push_back({"total", fmtTime(total)});
     Utilities::formatTable(buf, {"Phase", "Time"}, phaseRows);
 
-    if (graphPtr && graphPtr->getBuildProfile().deferredBlockCount > 0) {
+    if (graphPtr && !graphLoaded) {
       auto const &bp = graphPtr->getBuildProfile();
 
       buf.format("\nNetlist Build ({} thread{})\n", bp.numThreads,
@@ -721,6 +942,20 @@ auto main(int argc, char **argv) -> int {
     if (graphPtr) {
       buf.format("\nNetlist size: {} nodes, {} edges\n", graphPtr->numNodes(),
                  graphPtr->numEdges());
+
+      auto const &blackBoxPaths = graphPtr->getBlackBoxPaths();
+      auto const unmatched = graphPtr->getUnmatchedBlackBoxPatterns();
+      if (!blackBoxPaths.empty() || !unmatched.empty()) {
+        buf.format("\nBlack boxes: {} matched path{}\n",
+                   blackBoxPaths.size(),
+                   blackBoxPaths.size() == 1 ? "" : "s");
+        for (auto const &path : blackBoxPaths) {
+          buf.format("  {}\n", path);
+        }
+        for (auto const &pattern : unmatched) {
+          buf.format("  unmatched pattern: {}\n", pattern);
+        }
+      }
     }
 
     buf.format("\nPeak RSS: {:.1f} MB\n",
@@ -746,14 +981,17 @@ auto main(int argc, char **argv) -> int {
 
     if (loadNetlistFile) {
       // Load a previously-saved netlist (skips compilation).
+      graphLoaded = true;
       SmallVector<char> fileContent;
       auto ec = OS::readFile(*loadNetlistFile, fileContent);
       if (ec) {
         SLANG_THROW(std::runtime_error(
             fmt::format("could not read file: {}", *loadNetlistFile)));
       }
-      NetlistSerializer::deserialize(
-          std::string_view(fileContent.data(), fileContent.size()), graph);
+      timePhase("load", [&] {
+        NetlistSerializer::deserialize(
+            std::string_view(fileContent.data(), fileContent.size()), graph);
+      });
 
       DEBUG_PRINT("Loaded netlist has {} nodes and {} edges\n",
                   graph.numNodes(), graph.numEdges());
@@ -805,8 +1043,16 @@ auto main(int argc, char **argv) -> int {
       DEBUG_PRINT("Netlist has {} nodes and {} edges\n", graph.numNodes(),
                   graph.numEdges());
 
+      // A pattern that matched nothing is not an error, but silently doing
+      // nothing hides typos in the pattern.
+      for (auto const &pattern : graph.getUnmatchedBlackBoxPatterns()) {
+        fmt::print(stderr,
+                   "warning: --black-box pattern '{}' matched no instances\n",
+                   pattern);
+      }
+
       diagnostics =
-          std::make_unique<NetlistDiagnostics>(*compilation, !noColours);
+          std::make_unique<NetlistDiagnostics>(*compilation, useColours);
     }
 
     // --- Commands that work on both built and loaded netlists ---
@@ -814,7 +1060,7 @@ auto main(int argc, char **argv) -> int {
     // Write the netlist out.
     if (saveNetlistFile) {
       auto json = NetlistSerializer::serialize(graph);
-      OS::writeFile(*saveNetlistFile, json);
+      writeFile(*saveNetlistFile, json);
       printStats();
       return 0;
     }
@@ -825,15 +1071,109 @@ auto main(int argc, char **argv) -> int {
     // and scoped --netlist-dot) treats them uniformly. When both endpoints are
     // given, path-finding takes over instead; an explicit --fan-out/--fan-in
     // always wins.
-    if (fromPointName && !toPointName && !fanOutName) {
+    if (fromPointName && !toPointName && !fanOutName && !fanInName) {
       fanOutName = fromPointName;
-    } else if (toPointName && !fromPointName && !fanInName) {
+    } else if (toPointName && !fromPointName && !fanInName && !fanOutName) {
       fanInName = toPointName;
     }
+
+    // Collect the combinational fan-out over every node with the given name.
+    auto collectFanOut = [&](std::string const &name)
+        -> std::vector<NetlistNode *> {
+      auto startNodes = graph.lookupAll(name);
+      if (startNodes.empty()) {
+        SLANG_THROW(
+            std::runtime_error(fmt::format("could not find node: {}", name)));
+      }
+      std::unordered_set<NetlistNode *> seen;
+      std::vector<NetlistNode *> result;
+      for (auto *node : startNodes) {
+        if (seen.insert(node).second) {
+          result.push_back(node);
+        }
+        for (auto *n : graph.getCombFanOut(*node)) {
+          if (seen.insert(n).second) {
+            result.push_back(n);
+          }
+        }
+      }
+      return result;
+    };
+
+    // Collect the combinational fan-in over every node with the given name.
+    auto collectFanIn = [&](std::string const &name)
+        -> std::vector<NetlistNode *> {
+      auto endNodes = graph.lookupAll(name);
+      if (endNodes.empty()) {
+        SLANG_THROW(
+            std::runtime_error(fmt::format("could not find node: {}", name)));
+      }
+      std::unordered_set<NetlistNode *> seen;
+      std::vector<NetlistNode *> result;
+      for (auto *node : endNodes) {
+        if (seen.insert(node).second) {
+          result.push_back(node);
+        }
+        for (auto *n : graph.getCombFanIn(*node)) {
+          if (seen.insert(n).second) {
+            result.push_back(n);
+          }
+        }
+      }
+      return result;
+    };
+
+    // Find up to one path for every start/end node pair with the given names.
+    auto collectPaths = [&](std::string const &fromName,
+                            std::string const &toName)
+        -> std::vector<NetlistPath> {
+      auto fromNodes = graph.lookupAll(fromName);
+      if (fromNodes.empty()) {
+        SLANG_THROW(std::runtime_error(
+            fmt::format("could not find start point: {}", fromName)));
+      }
+      auto toNodes = graph.lookupAll(toName);
+      if (toNodes.empty()) {
+        SLANG_THROW(std::runtime_error(
+            fmt::format("could not find finish point: {}", toName)));
+      }
+      std::vector<NetlistPath> paths;
+      PathFinder pathFinder;
+      for (auto *from : fromNodes) {
+        for (auto *to : toNodes) {
+          auto path = pathFinder.find(*from, *to);
+          if (!path.empty()) {
+            paths.push_back(std::move(path));
+          }
+        }
+      }
+      return paths;
+    };
+
+    // Emit a node-list table for a fan cone, listing each signal once even
+    // when it is split across several nodes.
+    auto emitConeTable = [&](std::vector<NetlistNode *> const &nodes) {
+      auto header = Utilities::Row{"Name", "Location"};
+      auto table = Utilities::Table{};
+      std::unordered_set<std::string> reported;
+      for (auto const *n : nodes) {
+        auto path = n->getHierarchicalPath();
+        if (path.has_value() && passesFilters(*path)) {
+          auto loc = n->getLocation();
+          auto location = loc ? loc->toString(graph.fileTable) : std::string();
+          if (!reported.insert(std::string(*path) + "\n" + location).second) {
+            continue;
+          }
+          table.push_back(Utilities::Row{std::string(*path), location});
+        }
+      }
+      emitTable(header, table);
+    };
 
     if (reportRegisters) {
       auto header = Utilities::Row{"Name", "Location"};
       auto table = Utilities::Table{};
+      std::unordered_set<std::string> reported;
 
       for (auto const &node : graph.filterNodes(NodeKind::State)) {
         auto const &stateNode = node->as<State>();
@@ -841,6 +1181,11 @@ auto main(int argc, char **argv) -> int {
           continue;
         }
         auto loc = stateNode.location.toString(graph.fileTable);
+        // Bit-aligned resolution can split one register into several State
+        // nodes; report the register once.
+        if (!reported.insert(stateNode.hierarchicalPath + "\n" + loc).second) {
+          continue;
+        }
         table.push_back(Utilities::Row{stateNode.hierarchicalPath, loc});
       }
 
@@ -849,69 +1194,83 @@ auto main(int argc, char **argv) -> int {
       return 0;
     }
 
-    // Report combinational loops.
+    // Report combinational loops, optionally filtered and machine-readable.
     if (combLoops) {
       CombLoops combLoopsAnalysis(graph);
       auto cycles = combLoopsAnalysis.getAllLoops();
-      if (cycles.empty()) {
-        OS::print("No combinational loops detected in the design.\n");
-      } else {
-        for (auto const &cycle : cycles) {
-          OS::print("Combinational loop detected:\n\n");
-          auto result = reportPath(graph.fileTable, diagnostics.get(), cycle);
-          OS::print(fmt::format("{}\n", result));
+
+      // Keep a loop when any of its nodes passes --scope/--name.
+      auto cyclePasses = [&](std::vector<NetlistNode const *> const &cycle) {
+        if (scopeFilters.empty() && nameFilters.empty()) {
+          return true;
+        }
+        return std::any_of(cycle.begin(), cycle.end(), [&](auto *node) {
+          auto path = node->getHierarchicalPath();
+          return path.has_value() && passesFilters(*path);
+        });
+      };
+      std::vector<std::vector<NetlistNode const *>> filtered;
+      for (auto const &cycle : cycles) {
+        if (cyclePasses(cycle)) {
+          filtered.push_back(cycle);
         }
       }
+
+      if (outputFormat == Format::Json) {
+        writeOutput(loopsToJson(filtered, graph.fileTable));
+        printStats();
+        return 0;
+      }
+
+      netlist::FormatBuffer buffer;
+      if (filtered.empty()) {
+        buffer.format("No combinational loops detected in the design.\n");
+      } else {
+        for (auto const &cycle : filtered) {
+          buffer.format("Combinational loop detected:\n\n");
+          buffer.format("{}\n",
+                        reportPath(graph.fileTable, diagnostics.get(), cycle));
+        }
+      }
+      writeOutput(buffer.str());
       printStats();
       return 0;
     }
 
     // Output a DOT file of the netlist. When combined with a fan-out, fan-in
     // or path selector, render only that induced subgraph instead of the
-    // whole netlist.
+    // whole netlist. A signal name can resolve to several nodes, so a cone
+    // covers every one of them and a path scope is the union of every path
+    // found between same-named endpoints.
     if (netlistDotFile) {
-      auto requireNode = [&](std::string const &name) -> NetlistNode * {
-        auto *node = graph.lookup(name);
-        if (node == nullptr) {
-          SLANG_THROW(
-              std::runtime_error(fmt::format("could not find node: {}", name)));
-        }
-        return node;
-      };
-
       netlist::FormatBuffer buffer;
       if (fanOutName || fanInName || (fromPointName && toPointName)) {
         std::unordered_set<NetlistNode const *> scope;
         if (fanOutName) {
-          auto *node = requireNode(*fanOutName);
-          scope.insert(node);
-          for (auto *n : graph.getCombFanOut(*node)) {
-            scope.insert(n);
+          for (auto *node : collectFanOut(*fanOutName)) {
+            scope.insert(node);
           }
         } else if (fanInName) {
-          auto *node = requireNode(*fanInName);
-          scope.insert(node);
-          for (auto *n : graph.getCombFanIn(*node)) {
-            scope.insert(n);
+          for (auto *node : collectFanIn(*fanInName)) {
+            scope.insert(node);
           }
         } else {
-          auto *fromPoint = requireNode(*fromPointName);
-          auto *toPoint = requireNode(*toPointName);
-          PathFinder pathFinder;
-          auto path = pathFinder.find(*fromPoint, *toPoint);
-          if (path.empty()) {
+          auto paths = collectPaths(*fromPointName, *toPointName);
+          if (paths.empty()) {
             SLANG_THROW(std::runtime_error(fmt::format(
                 "no path between {} and {}", *fromPointName, *toPointName)));
           }
-          for (auto const *n : path) {
-            scope.insert(n);
+          for (auto const &path : paths) {
+            for (auto const *node : path) {
+              scope.insert(node);
+            }
           }
         }
         NetlistDot::render(graph, buffer, scope);
       } else {
         NetlistDot::render(graph, buffer);
       }
-      OS::writeFile(*netlistDotFile, buffer.str());
+      writeFile(*netlistDotFile, buffer.str());
       printStats();
       return 0;
     }
@@ -923,85 +1282,77 @@ auto main(int argc, char **argv) -> int {
                        : graph.findNodesRegex(*findRegexPattern);
       auto header = Utilities::Row{"Name", "Location"};
       auto table = Utilities::Table{};
+      // A signal split across several nodes by bit-aligned resolution would
+      // otherwise be listed once per node with the same name and location.
+      std::unordered_set<std::string> reported;
       for (auto const *node : nodes) {
         auto path = node->getHierarchicalPath();
         if (!passesFilters(path.value_or(""))) {
           continue;
         }
+        auto name = std::string(path.value_or("(unnamed)"));
+        if (!reported.insert(name).second) {
+          continue;
+        }
         auto loc = node->getLocation();
-        table.push_back(Utilities::Row{std::string(path.value_or("(unnamed)")),
-                                       loc ? loc->toString(graph.fileTable)
-                                           : std::string()});
+        auto location = loc ? loc->toString(graph.fileTable) : std::string();
+        table.push_back(Utilities::Row{name, location});
       }
       emitTable(header, table);
       printStats();
       return 0;
     }
 
-    // Report combinational fan-out from a named node.
+    // Report combinational fan-out from a named node. Every node sharing the
+    // name contributes its cone; the union is reported once per node.
     if (fanOutName.has_value()) {
-      auto *node = graph.lookup(*fanOutName);
-      if (node == nullptr) {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("could not find node: {}", *fanOutName)));
-      }
-      auto fanOut = graph.getCombFanOut(*node);
-      auto header = Utilities::Row{"Name", "Location"};
-      auto table = Utilities::Table{};
-      for (auto const *n : fanOut) {
-        auto path = n->getHierarchicalPath();
-        if (path.has_value() && passesFilters(*path)) {
-          auto loc = n->getLocation();
-          table.push_back(Utilities::Row{std::string(*path),
-                                         loc ? loc->toString(graph.fileTable)
-                                             : std::string()});
-        }
-      }
-      emitTable(header, table);
+      emitConeTable(collectFanOut(*fanOutName));
       printStats();
       return 0;
     }
 
     // Report combinational fan-in to a named node.
     if (fanInName.has_value()) {
-      auto *node = graph.lookup(*fanInName);
-      if (node == nullptr) {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("could not find node: {}", *fanInName)));
-      }
-      auto fanIn = graph.getCombFanIn(*node);
-      auto header = Utilities::Row{"Name", "Location"};
-      auto table = Utilities::Table{};
-      for (auto const *n : fanIn) {
-        auto path = n->getHierarchicalPath();
-        if (path.has_value() && passesFilters(*path)) {
-          auto loc = n->getLocation();
-          table.push_back(Utilities::Row{std::string(*path),
-                                         loc ? loc->toString(graph.fileTable)
-                                             : std::string()});
-        }
-      }
-      emitTable(header, table);
+      emitConeTable(collectFanIn(*fanInName));
       printStats();
       return 0;
     }
 
     // Report the clocks/resets gating a named node. A single hierarchical
     // name can resolve to several nodes (e.g. a register's State node and
-    // its same-named output Port), so aggregate sensitivity across all of
-    // them and deduplicate.
+    // its same-named output Port), so aggregate sensitivity per symbol. When
+    // a symbol has a State node, only its own clocking edges count; the
+    // same-named Port would otherwise pick up the clocks of the registers it
+    // feeds. Symbols without a State node fall back to the fan-out union.
     if (sensitivityName.has_value()) {
       auto nodes = graph.findNodes(*sensitivityName);
       if (nodes.empty()) {
         SLANG_THROW(std::runtime_error(
             fmt::format("could not find node: {}", *sensitivityName)));
       }
-      std::vector<NetlistGraph::SensitivitySource> sensitivity;
+      std::ranges::sort(nodes, {}, [](NetlistNode *node) { return node->ID; });
+
+      std::map<std::string, std::vector<NetlistNode *>> nodesByPath;
       for (auto *node : nodes) {
-        for (auto const &src : graph.getSensitivity(*node)) {
-          if (std::find(sensitivity.begin(), sensitivity.end(), src) ==
-              sensitivity.end()) {
-            sensitivity.push_back(src);
+        nodesByPath[std::string(node->getHierarchicalPath().value_or(""))]
+            .push_back(node);
+      }
+
+      std::vector<NetlistGraph::SensitivitySource> sensitivity;
+      for (auto &[path, group] : nodesByPath) {
+        bool hasState =
+            std::any_of(group.begin(), group.end(), [](NetlistNode *node) {
+              return node->kind == NodeKind::State;
+            });
+        for (auto *node : group) {
+          if (hasState && node->kind != NodeKind::State) {
+            continue;
+          }
+          for (auto const &src : graph.getSensitivity(*node)) {
+            if (std::find(sensitivity.begin(), sensitivity.end(), src) ==
+                sensitivity.end()) {
+              sensitivity.push_back(src);
+            }
           }
         }
       }
@@ -1048,7 +1399,10 @@ auto main(int argc, char **argv) -> int {
     // Report, per bit, the nodes driving a named signal.
     if (driversName.has_value()) {
       auto [path, range] = parseNameAndRange(*driversName);
-      if (graph.lookup(path) == nullptr) {
+      // A signal may exist only as an edge annotation, with no node of its
+      // own (an internal wire or reg); report its drivers, which is the empty
+      // table when it has none. Only a name that is absent is an error.
+      if (!graph.hasSymbol(path)) {
         SLANG_THROW(
             std::runtime_error(fmt::format("could not find node: {}", path)));
       }
@@ -1068,36 +1422,37 @@ auto main(int argc, char **argv) -> int {
       return 0;
     }
 
-    // Find a point-to-point path in the netlist.
+    // Find a point-to-point path in the netlist. A single name can resolve
+    // to several split nodes, so search every start/end pair and report the
+    // first path found.
     if (fromPointName.has_value() && toPointName.has_value()) {
-      auto *fromPoint = graph.lookup(*fromPointName);
-      if (fromPoint == nullptr) {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("could not find start point: {}", *fromPointName)));
-      }
-      auto *toPoint = graph.lookup(*toPointName);
-      if (toPoint == nullptr) {
-        SLANG_THROW(std::runtime_error(
-            fmt::format("could not find finish point: {}", *toPointName)));
-      }
-
       DEBUG_PRINT("Searching for path between: {} and {}\n", *fromPointName,
                   *toPointName);
 
-      // Search for the path.
-      PathFinder pathFinder;
-      auto path = pathFinder.find(*fromPoint, *toPoint);
+      auto paths = collectPaths(*fromPointName, *toPointName);
+      if (paths.empty()) {
+        SLANG_THROW(std::runtime_error(fmt::format(
+            "no path between {} and {}", *fromPointName, *toPointName)));
+      }
 
-      if (!path.empty()) {
-        auto result = reportPath(graph.fileTable, diagnostics.get(), path);
-        OS::print(fmt::format("{}\n", result));
+      if (outputFormat == Format::Json) {
+        writeOutput(pathToJson(paths.front(), graph.fileTable));
         printStats();
         return 0;
       }
 
-      // No path found.
-      SLANG_THROW(std::runtime_error(fmt::format(
-          "no path between {} and {}", *fromPointName, *toPointName)));
+      auto result =
+          reportPath(graph.fileTable, diagnostics.get(), paths.front());
+      writeOutput(fmt::format("{}\n", result));
+      printStats();
+      return 0;
+    }
+
+    // A bare --stats/--stats-json is a complete action: build (or load) the
+    // graph and report its statistics.
+    if (stats || statsJson) {
+      printStats();
+      return 0;
     }
 
     // If we reach here, no action was specified.

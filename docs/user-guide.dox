@@ -49,12 +49,18 @@ the full option list.
 - @c -h, @c --help: display available options.
 - @c --version: print version information and exit.
 - @c --no-colours: disable coloured output.
+- @c --colour: force coloured output even when stdout is not a terminal.
+  Colours are on by default only when stdout is an interactive terminal;
+  @c --no-colours takes precedence over @c --colour.
 - @c -q, @c --quiet: suppress non-essential output.
 - @c -d, @c --debug: enable debug logging (debug builds only).
 - @c -j, @c --threads @c \<N\>: set the number of threads (0 = hardware
   concurrency, 1 = sequential).
 - @c --stats: print phase timings and peak memory to stderr.
-- @c --stats-json: print phase timings and peak memory in JSON format to stdout.
+- @c --stats-json: print phase timings and peak memory in JSON format to
+  stderr. Statistics never mix with query results on stdout, so the two
+  streams can be parsed independently. Either option on its own is a
+  complete action: the netlist is built and its statistics printed.
 - @c --no-resolve-assign-bits: disable bit-aligned dependency resolution of
   concatenations, replications, conversions, and equal-width conditional
   operators in assignments and port connections; see
@@ -100,6 +106,24 @@ When the design has been compiled with the slang AST available, source locations
 are available and the output includes annotated source lines; otherwise after
 loading a serialised netlist, a plain @c file:line:col format is used.
 
+Pass @c --format @c json to render a path as machine-readable JSON, or
+@c -o @c \<file\> to write the report to a file instead of stdout. The JSON
+form is an array of alternating steps:
+
+- a node step: @c {\"type\":\"node\", \"node_kind\": ..., \"name\": ...,
+  \"path\": ..., \"location\": ...}, where @c node_kind is the node kind
+  (@c Port, @c State, @c Assignment, ...), @c name is the symbol name when the
+  node has one, @c path is its hierarchical path, and @c location is
+  @c file:line:col;
+- an edge step: @c {\"type\":\"edge\", \"symbol_path\": ...,
+  \"bits\": ..., \"edge_kind\": ...}.
+
+The array starts and ends with a node step and contains exactly one fewer edge
+step than node steps.
+
+A single name can resolve to several split nodes, so the search tries every
+combination of same-named start and end nodes and reports the first path found.
+
 Either endpoint may be given on its own. @c --from @c \<name\> alone reports the
 combinational fan-out cone from the node (equivalent to @c --fan-out), and
 @c --to @c \<name\> alone reports the combinational fan-in cone to it
@@ -115,8 +139,10 @@ node.
 @c --sensitivity @c \<name\>: report the clocks and resets gating a named
 node. For a register the node's own clocking edges are listed; for a
 combinational node the union of the clocking edges over every register in
-its combinational fan-out. Each entry shows the source signal, its edge
-kind, and source location.
+its combinational fan-out. When a name resolves to both a register State node
+and a same-named port, the register's own edges are used, so the clocks of
+the logic it feeds do not leak into the answer. Each entry shows the source
+signal, its edge kind, and source location.
 
 @c --constant-drivers @c \<name\>: report the constant values driving a
 named node when its combinational fan-in bottoms out only at literals
@@ -131,8 +157,17 @@ optional bit-range suffix narrows and clips the query, e.g.
 @c m.sig[3:0] or @c m.sig[2]; without one the whole signal is reported.
 This exposes the graph's bit-level connectivity directly.
 
+Only write edges count as drivers, so reading a signal does not make it look
+self-driven. A name can be a declared signal, a register, an output port, or an
+internal wire/reg that has no node of its own: internal signals are resolved
+from the symbols annotated on their driving edges. A hierarchical input port
+reports the actual wired to it. A name that is present in the design but has
+no known driver produces an empty table; only a name absent from the design
+is an error.
+
 @c --find @c \<pattern\>: find named nodes matching a glob pattern.
-See @ref glob-syntax for the full pattern syntax.
+A signal split across several nodes is listed once. See @ref glob-syntax
+for the full pattern syntax.
 
 @c --find-regex @c \<pattern\>: find named nodes matching a regex pattern.
 
@@ -156,7 +191,11 @@ rtl-wiring-inspector design.sv --report-registers --scope top.cpu --name "**.q_r
 
 The tabular query and report commands (@c --report-registers, @c --find,
 @c --find-regex, @c --fan-out, @c --fan-in, @c --sensitivity,
-@c --constant-drivers, and @c --drivers) accept @c --format @c \<table|json\>.
+@c --constant-drivers, and @c --drivers), plus the @c --from/@c --to path
+query and @c --comb-loops, accept @c --format @c \<table|json\>.
+For a path, @c --format @c json emits the alternating node/edge step array
+described above; for combinational loops it emits the loop array. @c table is
+the default and leaves each command's native text output unchanged.
 The default @c table renders an aligned text table; @c json emits an array of
 objects keyed by the lower-cased column headers (@c name, @c location,
 @c edge, @c value, @c bits, @c driver), which is convenient for scripting and
@@ -172,13 +211,23 @@ rtl-wiring-inspector design.sv --report-registers --format json -o registers.jso
 @c --report-registers: list all registers (@c State nodes) in the design.
 A State node is created for any variable that is assigned inside a clocked
 procedural block (@c always_ff or an @c always block with an edge-sensitive
-event list). Each entry shows the hierarchical path and source location.
+event list). Each entry shows the hierarchical path and source location. A
+register split into several State nodes by bit-aligned resolution is listed
+once.
 
 @c --comb-loops: detect and report combinational loops. Reports cycles in
 the graph that consist entirely of combinational (non-clocked) edges. Each
 loop is printed as a path from a node back to itself. A reported loop means
 the tool found a structural cycle in the source-level dependency graph; see
 @ref bit-dependency-resolution for caveats on precision.
+
+The @c --scope and @c --name filters apply to loop reports: a loop is kept
+when at least one of its nodes passes the filters. Pass @c --format @c json
+to emit loops as JSON instead: an array of objects with @c length (the number
+of nodes in the cycle), a @c nodes array of node steps, and an @c edges array
+of edge steps. The edges include the closing edge, so both arrays have
+@c length entries. An empty array is printed when no loop is found. The node
+and edge step schemas are the same as for path JSON.
 
 For AST-level reports (variables, ports, drivers, AST JSON dump) use
 @c rtl-report, see @ref cli-report below.
@@ -441,9 +490,18 @@ Use @c --stats to print a human-readable timing breakdown to stderr:
 rtl-wiring-inspector design.sv --report-registers --stats
 @endcode
 
-The output shows per-phase timings (collect, parallel DFA, drain, resolve
-R-values), per-task statistics (min/max/mean/median), and peak RSS. Use
-@c --stats-json for machine-readable JSON output.
+The output shows per-phase timings (parsing, elaboration, analysis, netlist
+construction), per-task statistics (min/max/mean/median), the netlist size,
+and peak RSS. The Netlist Build section is printed for every newly built
+graph, including designs that defer no blocks.
+
+Use @c --stats-json for machine-readable JSON output, also on stderr. Its
+@c time_seconds object holds one entry per phase, @c graph_source is
+@c \"built\" or @c \"loaded\", and @c black_boxes lists the requested
+patterns, the matched instance paths, and the patterns that matched nothing.
+When a netlist is loaded with @c --load-netlist, the load time is reported as
+@c time_seconds.load, @c graph_source is @c \"loaded\", and
+@c netlist_profile is omitted because no construction took place.
 
 @subsection perf-considerations Considerations
 
@@ -597,6 +655,11 @@ every instantiation of a module:
 @code{.ansi}
 rtl-wiring-inspector design.sv --black-box ram_* --black-box top.cpu.fpu
 @endcode
+
+A pattern that matches no instance is reported as a warning on stderr and
+otherwise ignored; it does not change the netlist or the exit status. Both
+@c --stats and @c --stats-json report the requested patterns, the matched
+instance paths, and any unmatched patterns.
 
 The Python equivalent passes a list of patterns to @c NetlistGraph.build:
 

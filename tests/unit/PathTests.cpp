@@ -122,3 +122,21 @@ endmodule
   CHECK(path.empty());
   CHECK(path.size() == 0);
 }
+
+TEST_CASE("lookupAll returns every split node ordered by ID", "[Path]") {
+  auto const &tree = R"(
+module sub(input logic [1:0] x, output logic y);
+  assign y = x[1];
+endmodule
+module top(input logic a, input logic b, output logic c);
+  sub u(.x({b, a}), .y(c));
+endmodule
+)";
+  const NetlistTest test(tree);
+  auto nodes = test.graph.lookupAll("top.u.x");
+  REQUIRE(nodes.size() == 2);
+  CHECK(nodes[0]->ID < nodes[1]->ID);
+  // lookup still returns the first of them.
+  CHECK(test.graph.lookup("top.u.x") == nodes[0]);
+  CHECK(test.graph.lookupAll("top.nonexistent").empty());
+}
