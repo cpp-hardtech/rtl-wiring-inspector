@@ -155,10 +155,11 @@ Static Public Attributes</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
-<p>Deserialise a JSON string into <code class="param">graph</code>. The graph must be empty. <a class="el" href="classslang_1_1netlist_1_1FileTable.html">FileTable</a> is populated from the JSON.</p>
+<p>Deserialise a JSON string into <code class="param">graph</code>. The graph must be empty. <a class="el" href="classslang_1_1netlist_1_1FileTable.html">FileTable</a> and black-box paths are populated from the JSON.</p>
+<p>Every node and edge is validated before the graph is modified, so a malformed document leaves <code class="param">graph</code> untouched.</p>
 <dl class="exception"><dt>Exceptions</dt><dd>
   <table class="exception">
-    <tr><td class="paramname">std::runtime_error</td><td>on parse failure or unsupported version. </td></tr>
+    <tr><td class="paramname">std::runtime_error</td><td>with an "invalid netlist:" diagnostic on parse failure, unsupported format version, or inconsistent contents. </td></tr>
   </table>
   </dd>
 </dl>
