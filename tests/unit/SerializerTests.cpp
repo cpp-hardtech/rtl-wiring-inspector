@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 
 //===----------------------------------------------------------------------===//
@@ -22,6 +24,26 @@ static auto roundTrip(NetlistTest const &test)
   auto loaded = std::make_unique<NetlistGraph>();
   NetlistSerializer::deserialize(json, *loaded);
   return loaded;
+}
+
+/// Deserialize @p jsonText expecting a runtime_error that carries a stable
+/// "invalid netlist" diagnostic, and require the target graph to have been
+/// left untouched. Returns the diagnostic text.
+static auto deserializeError(std::string_view jsonText) -> std::string {
+  NetlistGraph graph;
+  try {
+    NetlistSerializer::deserialize(jsonText, graph);
+  } catch (std::runtime_error const &error) {
+    std::string message = error.what();
+    CHECK(graph.numNodes() == 0);
+    CHECK(graph.numEdges() == 0);
+    CHECK(graph.fileTable.size() == 0);
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring("invalid netlist:"));
+    CHECK_THAT(message, !Catch::Matchers::ContainsSubstring("[json.exception"));
+    return message;
+  }
+  FAIL("expected deserialize to reject the document");
+  return {};
 }
 
 //===----------------------------------------------------------------------===//
@@ -435,16 +457,16 @@ TEST_CASE("Malformed JSON throws error", "[Serializer]") {
 
 TEST_CASE("Edge referencing unknown node throws error", "[Serializer]") {
   auto badJson = R"({
-    "version": 1,
+    "version": 4,
     "fileTable": [],
-    "nodes": [],
-    "edges": [{"source": 999, "target": 888, "edgeKind": "None",
-               "symbol": {"name":"","path":"","location":{"fileIndex":0,"line":0,"column":0}},
-               "bounds": [0,0], "disabled": false}]
+    "nodes": [{"id": 1, "kind": "None"}],
+    "edges": [{"source": 1, "target": 888, "edgeKind": "None",
+               "symbol": {}, "bounds": [0,0], "disabled": false}]
   })";
-  NetlistGraph graph;
-  CHECK_THROWS_AS(NetlistSerializer::deserialize(badJson, graph),
-                  std::runtime_error);
+  auto message = deserializeError(badJson);
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring("edges[0]"));
+  CHECK_THAT(message,
+             Catch::Matchers::ContainsSubstring("unknown node id 888"));
 }
 
 TEST_CASE("getLocation returns value for all node types", "[Serializer]") {
@@ -621,15 +643,17 @@ TEST_CASE("An unknown operation kind is rejected", "[Serializer]") {
      "signed": false,
      "location": {"fileIndex": 0, "line": 1, "column": 1}}],
     "edges": []})";
-  NetlistGraph graph;
-  CHECK_THROWS_WITH(NetlistSerializer::deserialize(json, graph),
-                    Catch::Matchers::ContainsSubstring("NotAnOperator"));
+  auto message = deserializeError(json);
+  CHECK_THAT(message,
+             Catch::Matchers::ContainsSubstring("unknown operation kind "
+                                                "'NotAnOperator'"));
 }
 
 TEST_CASE("Version 3 graphs are rejected", "[Serializer]") {
   auto json = R"({"version": 3, "fileTable": [], "nodes": [], "edges": []})";
-  NetlistGraph graph;
-  CHECK_THROWS(NetlistSerializer::deserialize(json, graph));
+  auto message = deserializeError(json);
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                          "unsupported format version 3 (expected 4)"));
 }
 
 TEST_CASE("Round-trip preserves parallel edges", "[Serializer]") {
@@ -682,4 +706,250 @@ endmodule
 
   CHECK(loaded->numEdges() == test.graph.numEdges());
   CHECK(collectEdges(*loaded) == original);
+}
+
+//===----------------------------------------------------------------------===//
+// Deserialisation validation
+//===----------------------------------------------------------------------===//
+
+TEST_CASE("Unknown node kind is rejected", "[Serializer]") {
+  auto message = deserializeError(R"({
+    "version": 4, "fileTable": [],
+    "nodes": [{"id": 1, "kind": "NotARealKind"}],
+    "edges": []
+  })");
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring("nodes[0]"));
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                          "unknown node kind 'NotARealKind'"));
+}
+
+TEST_CASE("Unknown port direction is rejected", "[Serializer]") {
+  auto message = deserializeError(R"({
+    "version": 4, "fileTable": ["m.sv"],
+    "nodes": [{"id": 1, "kind": "Port", "path": "m.a", "name": "a",
+               "bounds": [0, 0], "direction": "Sideways",
+               "location": {"fileIndex": 0, "line": 1, "column": 1}}],
+    "edges": []
+  })");
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                          "unknown port direction 'Sideways'"));
+}
+
+TEST_CASE("Unknown edge kind is rejected", "[Serializer]") {
+  auto message = deserializeError(R"({
+    "version": 4, "fileTable": [],
+    "nodes": [{"id": 1, "kind": "None"}],
+    "edges": [{"source": 1, "target": 1, "edgeKind": "Sideways",
+               "symbol": {}, "bounds": [0, 0], "disabled": false}]
+  })");
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring("edges[0]"));
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                          "unknown edge kind 'Sideways'"));
+}
+
+TEST_CASE("None node and edge kinds remain valid", "[Serializer]") {
+  auto json = R"({
+    "version": 4, "fileTable": [],
+    "nodes": [{"id": 1, "kind": "None"}, {"id": 2, "kind": "None"}],
+    "edges": [{"source": 1, "target": 2, "edgeKind": "None",
+               "symbol": {}, "bounds": [0, 0], "disabled": false}]
+  })";
+  NetlistGraph graph;
+  REQUIRE_NOTHROW(NetlistSerializer::deserialize(json, graph));
+  CHECK(graph.numNodes() == 2);
+  CHECK(graph.numEdges() == 1);
+
+  for (auto const &node : graph) {
+    CHECK(node->kind == NodeKind::None);
+  }
+  for (auto const &node : graph) {
+    for (auto const &edge : node->getOutEdges()) {
+      CHECK(edge->edgeKind == ast::EdgeKind::None);
+      CHECK(edge->symbol == nullptr);
+    }
+  }
+}
+
+TEST_CASE("Missing required fields are reported with their path",
+          "[Serializer]") {
+  SECTION("version") {
+    auto message =
+        deserializeError(R"({"fileTable": [], "nodes": [], "edges": []})");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                            "missing required field 'version'"));
+  }
+  SECTION("nodes") {
+    auto message =
+        deserializeError(R"({"version": 4, "fileTable": [], "edges": []})");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                            "missing required field 'nodes'"));
+  }
+  SECTION("node bounds") {
+    auto message = deserializeError(R"({
+      "version": 4, "fileTable": ["m.sv"],
+      "nodes": [{"id": 1, "kind": "Port", "path": "m.a", "name": "a",
+                 "direction": "In",
+                 "location": {"fileIndex": 0, "line": 1, "column": 1}}],
+      "edges": []
+    })");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                            "nodes[0]: missing required field 'bounds'"));
+  }
+}
+
+TEST_CASE("Truncated and empty documents get stable diagnostics",
+          "[Serializer]") {
+  SECTION("truncated") {
+    auto message = deserializeError(R"({"version": 4, "nodes": [)");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring("parse error"));
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring("line 1"));
+  }
+  SECTION("empty") {
+    auto message = deserializeError("");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring("parse error"));
+  }
+}
+
+TEST_CASE("Duplicate node ids are rejected", "[Serializer]") {
+  auto message = deserializeError(R"({
+    "version": 4, "fileTable": [],
+    "nodes": [{"id": 7, "kind": "None"}, {"id": 7, "kind": "None"}],
+    "edges": []
+  })");
+  CHECK_THAT(message,
+             Catch::Matchers::ContainsSubstring("duplicate node id 7"));
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring("nodes[1]"));
+}
+
+TEST_CASE("Invalid bounds are rejected", "[Serializer]") {
+  SECTION("lower greater than upper") {
+    auto message = deserializeError(R"({
+      "version": 4, "fileTable": ["m.sv"],
+      "nodes": [{"id": 1, "kind": "Port", "path": "m.a", "name": "a",
+                 "bounds": [5, 2], "direction": "In",
+                 "location": {"fileIndex": 0, "line": 1, "column": 1}}],
+      "edges": []
+    })");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                            "lower bound 5 exceeds upper bound 2"));
+  }
+  SECTION("wrong number of elements") {
+    auto message = deserializeError(R"({
+      "version": 4, "fileTable": ["m.sv"],
+      "nodes": [{"id": 1, "kind": "Port", "path": "m.a", "name": "a",
+                 "bounds": [5], "direction": "In",
+                 "location": {"fileIndex": 0, "line": 1, "column": 1}}],
+      "edges": []
+    })");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                            "must contain exactly two integers"));
+  }
+  SECTION("non-integer element") {
+    auto message = deserializeError(R"({
+      "version": 4, "fileTable": ["m.sv"],
+      "nodes": [{"id": 1, "kind": "Port", "path": "m.a", "name": "a",
+                 "bounds": [0, "1"], "direction": "In",
+                 "location": {"fileIndex": 0, "line": 1, "column": 1}}],
+      "edges": []
+    })");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                            "nodes[0].bounds[1] must be an integer"));
+  }
+}
+
+TEST_CASE("Out-of-range file table index is rejected", "[Serializer]") {
+  auto message = deserializeError(R"({
+    "version": 4, "fileTable": ["m.sv"],
+    "nodes": [{"id": 1, "kind": "Port", "path": "m.a", "name": "a",
+               "bounds": [0, 0], "direction": "In",
+               "location": {"fileIndex": 5, "line": 1, "column": 1}}],
+    "edges": []
+  })");
+  CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                          "fileIndex 5 is out of range (fileTable has 1 "
+                          "entries)"));
+}
+
+TEST_CASE("Malformed field types get stable diagnostics", "[Serializer]") {
+  SECTION("version is a string") {
+    auto message = deserializeError(
+        R"({"version": "4", "fileTable": [], "nodes": [], "edges": []})");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                            "version must be an integer, got string"));
+  }
+  SECTION("nodes is an object") {
+    auto message = deserializeError(
+        R"({"version": 4, "fileTable": [], "nodes": {}, "edges": []})");
+    CHECK_THAT(message, Catch::Matchers::ContainsSubstring(
+                            "nodes must be an array, got object"));
+  }
+}
+
+TEST_CASE("Deserialising into a non-empty graph is rejected", "[Serializer]") {
+  NetlistGraph graph;
+  graph.addNode(std::make_unique<Port>("a", "m.a", TextLocation{},
+                                       ast::ArgumentDirection::In,
+                                       DriverBitRange{0, 0}));
+  auto json = R"({"version": 4, "fileTable": [], "nodes": [], "edges": []})";
+  CHECK_THROWS_WITH(
+      NetlistSerializer::deserialize(json, graph),
+      Catch::Matchers::ContainsSubstring("target graph must be empty"));
+  CHECK(graph.numNodes() == 1);
+  CHECK(graph.fileTable.size() == 0);
+}
+
+TEST_CASE("A hand-written valid document loads", "[Serializer]") {
+  auto json = R"({
+    "version": 4,
+    "fileTable": ["m.sv", "m.sv"],
+    "blackBoxes": ["m.u"],
+    "nodes": [
+      {"id": 10, "kind": "Port", "path": "m.a", "name": "a",
+       "bounds": [0, 3], "direction": "In",
+       "location": {"fileIndex": 1, "line": 2, "column": 3}},
+      {"id": 20, "kind": "State", "path": "m.q", "name": "q",
+       "bounds": [0, 3],
+       "location": {"fileIndex": 1, "line": 4, "column": 5}}
+    ],
+    "edges": [
+      {"source": 10, "target": 20, "edgeKind": "BothEdges",
+       "symbol": {"name": "a", "path": "m.a",
+                  "location": {"fileIndex": 0, "line": 2, "column": 3}},
+       "bounds": [0, 3], "disabled": true}
+    ]
+  })";
+
+  NetlistGraph graph;
+  REQUIRE_NOTHROW(NetlistSerializer::deserialize(json, graph));
+  CHECK(graph.numNodes() == 2);
+  CHECK(graph.numEdges() == 1);
+  // Duplicate filenames collapse to one entry, and indices are remapped.
+  CHECK(graph.fileTable.size() == 1);
+  REQUIRE(graph.getBlackBoxPaths().size() == 1);
+  CHECK(graph.getBlackBoxPaths()[0] == "m.u");
+
+  auto *port = graph.lookup("m.a");
+  REQUIRE(port != nullptr);
+  auto const &portNode = port->as<Port>();
+  CHECK(portNode.location.fileIndex == 0);
+  CHECK(portNode.location.toString(graph.fileTable) == "m.sv:2:3");
+  CHECK(portNode.bounds.lower() == 0);
+  CHECK(portNode.bounds.upper() == 3);
+  CHECK(portNode.direction == ast::ArgumentDirection::In);
+
+  auto *state = graph.lookup("m.q");
+  REQUIRE(state != nullptr);
+  CHECK(state->as<State>().location.toString(graph.fileTable) == "m.sv:4:5");
+
+  REQUIRE(port->getOutEdges().size() == 1);
+  auto const &edge = *port->getOutEdges().front();
+  CHECK(&edge.getTargetNode() == state);
+  CHECK(edge.edgeKind == ast::EdgeKind::BothEdges);
+  CHECK(edge.disabled);
+  CHECK(edge.bounds.lower() == 0);
+  CHECK(edge.bounds.upper() == 3);
+  REQUIRE(edge.symbol != nullptr);
+  CHECK(edge.symbol->name == "a");
+  CHECK(edge.symbol->hierarchicalPath == "m.a");
+  CHECK(edge.symbol->location.toString(graph.fileTable) == "m.sv:2:3");
 }
