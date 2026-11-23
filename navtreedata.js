@@ -126,8 +126,8 @@ var NAVTREEINDEX =
 [
 "BuildProfile_8hpp.html",
 "classslang_1_1netlist_1_1NetlistGraph.html#a1d3dc1ea2d3d996b22b8e377078d1f58",
-"classslang_1_1netlist_1_1State.html#a99311e0415f2d1325d3661756d0c5cc8",
-"namespaceslang_1_1netlist.html#af70e1b4b94ef56a8ec79732048337abba68be4837f6c739877233e527a996dd00"
+"classslang_1_1netlist_1_1Port.html#ac32e1eb4889911fa067089b2301825c9",
+"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6daec211f7c20af43e742bf2570c3cb84f9"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';

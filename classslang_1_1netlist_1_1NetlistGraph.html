@@ -119,6 +119,8 @@ Classes</h2></td></tr>
 Public Member Functions</h2></td></tr>
 <tr class="memitem:affc868eee760749d677c67049bcf2e9f" id="r_affc868eee760749d677c67049bcf2e9f"><td class="memItemLeft">void&#160;</td><td class="memItemRight"><a class="el" href="#affc868eee760749d677c67049bcf2e9f">build</a> (ast::Compilation &amp;compilation, analysis::AnalysisManager &amp;analysisManager, <a class="el" href="structslang_1_1netlist_1_1BuilderOptions.html">BuilderOptions</a> options={})</td></tr>
 <tr class="memitem:aaa288c3a5da8ab46743b61a864250fa7" id="r_aaa288c3a5da8ab46743b61a864250fa7"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#aaa288c3a5da8ab46743b61a864250fa7">lookup</a> (std::string_view name) const -&gt; <a class="el" href="classslang_1_1netlist_1_1NetlistNode.html">NetlistNode</a> *</td></tr>
+<tr class="memitem:ac4a9bece1ec772bb5d87c1fcac1fb141" id="r_ac4a9bece1ec772bb5d87c1fcac1fb141"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#ac4a9bece1ec772bb5d87c1fcac1fb141">lookupAll</a> (std::string_view name) const -&gt; std::vector&lt; <a class="el" href="classslang_1_1netlist_1_1NetlistNode.html">NetlistNode</a> * &gt;</td></tr>
+<tr class="memitem:a940ff5d079226ef58b52574011cd8128" id="r_a940ff5d079226ef58b52574011cd8128"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#a940ff5d079226ef58b52574011cd8128">hasSymbol</a> (std::string_view name) const -&gt; bool</td></tr>
 <tr class="memitem:a1775f8b4cb3d9356600b3cefd2ac59cc" id="r_a1775f8b4cb3d9356600b3cefd2ac59cc"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#a1775f8b4cb3d9356600b3cefd2ac59cc">lookup</a> (std::string_view name, <a class="el" href="structslang_1_1netlist_1_1DriverBitRange.html">DriverBitRange</a> bounds) const -&gt; std::vector&lt; <a class="el" href="classslang_1_1netlist_1_1NetlistNode.html">NetlistNode</a> * &gt;</td></tr>
 <tr class="memitem:a1991e643fecaa0f4ad7de224868de488" id="r_a1991e643fecaa0f4ad7de224868de488"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#a1991e643fecaa0f4ad7de224868de488">getDrivers</a> (std::string_view name, <a class="el" href="structslang_1_1netlist_1_1DriverBitRange.html">DriverBitRange</a> bounds) const -&gt; std::vector&lt; <a class="el" href="classslang_1_1netlist_1_1NetlistNode.html">NetlistNode</a> * &gt;</td></tr>
 <tr class="memitem:a927e217f17e91aa8582dcd110aa893f9" id="r_a927e217f17e91aa8582dcd110aa893f9"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#a927e217f17e91aa8582dcd110aa893f9">getDrivers</a> (<a class="el" href="classslang_1_1netlist_1_1NetlistNode.html">NetlistNode</a> const &amp;node) const -&gt; std::vector&lt; <a class="el" href="classslang_1_1netlist_1_1NetlistNode.html">NetlistNode</a> * &gt;</td></tr>
@@ -141,6 +143,14 @@ Public Member Functions</h2></td></tr>
 <tr class="memdesc:a3b708446af3ee845b51b21e9ec9cc1e0"><td class="mdescLeft">&#160;</td><td class="mdescRight">Record the hierarchical path of a black-boxed instance.  <br /></td></tr>
 <tr class="memitem:a3c4c84e5e13bb20ffd74bc0f89865f9e" id="r_a3c4c84e5e13bb20ffd74bc0f89865f9e"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#a3c4c84e5e13bb20ffd74bc0f89865f9e">getBlackBoxPaths</a> () const -&gt; std::span&lt; std::string const &gt;</td></tr>
 <tr class="memdesc:a3c4c84e5e13bb20ffd74bc0f89865f9e"><td class="mdescLeft">&#160;</td><td class="mdescRight">Return the hierarchical paths of the black-boxed instances.  <br /></td></tr>
+<tr class="memitem:a85175bbd49cd5281a50ae3cc46f0ccdc" id="r_a85175bbd49cd5281a50ae3cc46f0ccdc"><td class="memItemLeft">void&#160;</td><td class="memItemRight"><a class="el" href="#a85175bbd49cd5281a50ae3cc46f0ccdc">setBlackBoxPatterns</a> (std::vector&lt; std::string &gt; patterns)</td></tr>
+<tr class="memdesc:a85175bbd49cd5281a50ae3cc46f0ccdc"><td class="mdescLeft">&#160;</td><td class="mdescRight">Record the &ndash;black-box patterns the build was configured with.  <br /></td></tr>
+<tr class="memitem:ae039facaf2bc138a2f8c02316660bf98" id="r_ae039facaf2bc138a2f8c02316660bf98"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#ae039facaf2bc138a2f8c02316660bf98">getBlackBoxPatterns</a> () const -&gt; std::span&lt; std::string const &gt;</td></tr>
+<tr class="memdesc:ae039facaf2bc138a2f8c02316660bf98"><td class="mdescLeft">&#160;</td><td class="mdescRight">Return the &ndash;black-box patterns the build was configured with.  <br /></td></tr>
+<tr class="memitem:a5cf387f4adab4f1782bb3212f28912d2" id="r_a5cf387f4adab4f1782bb3212f28912d2"><td class="memItemLeft">void&#160;</td><td class="memItemRight"><a class="el" href="#a5cf387f4adab4f1782bb3212f28912d2">markBlackBoxPatternMatched</a> (size_t index)</td></tr>
+<tr class="memdesc:a5cf387f4adab4f1782bb3212f28912d2"><td class="mdescLeft">&#160;</td><td class="mdescRight">Record that the &ndash;black-box pattern at <code class="param">index</code> matched an instance.  <br /></td></tr>
+<tr class="memitem:ab87e81d9aa2b42ce3c8fe8cbc4f632e1" id="r_ab87e81d9aa2b42ce3c8fe8cbc4f632e1"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#ab87e81d9aa2b42ce3c8fe8cbc4f632e1">getUnmatchedBlackBoxPatterns</a> () const -&gt; std::vector&lt; std::string &gt;</td></tr>
+<tr class="memdesc:ab87e81d9aa2b42ce3c8fe8cbc4f632e1"><td class="mdescLeft">&#160;</td><td class="mdescRight">Return the configured &ndash;black-box patterns that matched no instance.  <br /></td></tr>
 <tr class="memitem:ab573257f68359a5c4544813145f470ee" id="r_ab573257f68359a5c4544813145f470ee"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#ab573257f68359a5c4544813145f470ee">getBlackBoxCoverage</a> (<a class="el" href="classslang_1_1netlist_1_1NetlistNode.html">NetlistNode</a> const &amp;node) const -&gt; <a class="el" href="namespaceslang_1_1netlist.html#a54d6fa1302e7976bc8041a1fdcfcb628">BlackBoxCoverage</a></td></tr>
 <tr class="inherit_header pub_methods_classslang_1_1netlist_1_1DirectedGraph"><td colspan="2" onclick="javascript:dynsection.toggleInherit('pub_methods_classslang_1_1netlist_1_1DirectedGraph')"><span class="dynarrow"><span class="arrowhead closed"></span></span>Public Member Functions inherited from <a class="el" href="classslang_1_1netlist_1_1DirectedGraph.html">slang::netlist::DirectedGraph&lt; NetlistNode, NetlistEdge &gt;</a></td></tr>
 <tr class="memitem:a4f64032340c05b235e072fb2c029f75e inherit pub_methods_classslang_1_1netlist_1_1DirectedGraph" id="r_a4f64032340c05b235e072fb2c029f75e"><td class="memItemLeft">&#160;</td><td class="memItemRight"><a class="el" href="classslang_1_1netlist_1_1DirectedGraph.html#a4f64032340c05b235e072fb2c029f75e">DirectedGraph</a> ()=default</td></tr>
@@ -383,7 +393,8 @@ Additional Inherited Members</h2></td></tr>
 </table>
 </div><div class="memdoc">
 <p>Return the per-bit drivers of the symbol <code class="param">name</code> over <code class="param">bounds</code>.</p>
-<p>Unlike getDrivers, which returns the deduplicated set of driver nodes, this keeps one entry per contributing edge, each clipped to the sub-range of <code class="param">name</code> that the driver actually covers, so callers can report bit-level provenance. Entries are sorted by ascending bit position and deduplicated on (bounds, driver). </p>
+<p>Unlike getDrivers, which returns the deduplicated set of driver nodes, this keeps one entry per contributing edge, each clipped to the sub-range of <code class="param">name</code> that the driver actually covers, so callers can report bit-level provenance. Entries are sorted by ascending bit position and deduplicated on (bounds, driver).</p>
+<p>Driver edges are selected as in getDrivers. In addition, an edge into a same-named <a class="el" href="classslang_1_1netlist_1_1Port.html">Port</a> node that is annotated with another symbol (the actual of a port connection) reports that actual as the driver over the port node's own bit range, so <span class="tt">--drivers top.u.x</span> shows the source wired to the hierarchical input port. </p>
 
 </div>
 </div>
@@ -438,6 +449,33 @@ Additional Inherited Members</h2></td></tr>
 </div><div class="memdoc">
 
 <p>Return the hierarchical paths of the black-boxed instances. </p>
+
+</div>
+</div>
+<a id="ae039facaf2bc138a2f8c02316660bf98" name="ae039facaf2bc138a2f8c02316660bf98"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ae039facaf2bc138a2f8c02316660bf98">&#9670;&#160;</a></span>getBlackBoxPatterns()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">auto slang::netlist::NetlistGraph::getBlackBoxPatterns </td>
+          <td>(</td>
+          <td class="paramname"><span class="paramname"><em></em></span></td><td>)</td>
+          <td> const -&gt; std::span&lt; std::string const  &gt;</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel inline">inline</span><span class="mlabel nodiscard">nodiscard</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+<p>Return the &ndash;black-box patterns the build was configured with. </p>
 
 </div>
 </div>
@@ -601,7 +639,7 @@ Additional Inherited Members</h2></td></tr>
 </table>
 </div><div class="memdoc">
 <p>Return the set of driver nodes for the symbol with the given hierarchical <code class="param">name</code> over the bit range <code class="param">bounds</code>.</p>
-<p>A driver is any node that is the source of an edge annotated with a matching symbol reference whose bounds overlap <code class="param">bounds</code>. Each driver is reported at most once. </p>
+<p>A driver is any node that is the source of an edge annotated with a matching symbol reference whose bounds overlap <code class="param">bounds</code>. For a symbol with a storage node (a <a class="el" href="classslang_1_1netlist_1_1Port.html">Port</a>, <a class="el" href="classslang_1_1netlist_1_1State.html">State</a>, or <a class="el" href="classslang_1_1netlist_1_1Variable.html">Variable</a>), write edges (those targeting a storage node) are the drivers, and a read edge emitted by a node that also writes the signal is not repeated. An internal symbol without a storage node reports the node that writes each range. Each driver is reported at most once. </p>
 
 </div>
 </div>
@@ -631,6 +669,60 @@ Additional Inherited Members</h2></td></tr>
 
 </div>
 </div>
+<a id="ab87e81d9aa2b42ce3c8fe8cbc4f632e1" name="ab87e81d9aa2b42ce3c8fe8cbc4f632e1"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ab87e81d9aa2b42ce3c8fe8cbc4f632e1">&#9670;&#160;</a></span>getUnmatchedBlackBoxPatterns()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">auto slang::netlist::NetlistGraph::getUnmatchedBlackBoxPatterns </td>
+          <td>(</td>
+          <td class="paramname"><span class="paramname"><em></em></span></td><td>)</td>
+          <td> const -&gt;  std::vector&lt; std::string &gt;</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel nodiscard">nodiscard</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+
+<p>Return the configured &ndash;black-box patterns that matched no instance. </p>
+
+</div>
+</div>
+<a id="a940ff5d079226ef58b52574011cd8128" name="a940ff5d079226ef58b52574011cd8128"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a940ff5d079226ef58b52574011cd8128">&#9670;&#160;</a></span>hasSymbol()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">auto slang::netlist::NetlistGraph::hasSymbol </td>
+          <td>(</td>
+          <td class="paramtype">std::string_view</td>          <td class="paramname"><span class="paramname"><em>name</em></span></td><td>)</td>
+          <td> const -&gt;  bool</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel nodiscard">nodiscard</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+<p>Return true if <code class="param">name</code> identifies a symbol in the graph.</p>
+<p>A symbol is present when a node carries the path or when an edge is annotated with it. This distinguishes a real signal that has no known driver from a name that is absent from the design. </p>
+
+</div>
+</div>
 <a id="aaa288c3a5da8ab46743b61a864250fa7" name="aaa288c3a5da8ab46743b61a864250fa7"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#aaa288c3a5da8ab46743b61a864250fa7">&#9670;&#160;</a></span>lookup() <span class="overload">[1/2]</span></h2>
 
@@ -654,6 +746,7 @@ Additional Inherited Members</h2></td></tr>
 </table>
 </div><div class="memdoc">
 <p>Lookup a node in the graph by its hierarchical name.</p>
+<p>When the signal is split across several nodes (see lookupAll), this returns the one with the lowest node ID.</p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
     <tr><td class="paramname">name</td><td>The hierarchical name of the node. </td></tr>
@@ -695,6 +788,52 @@ Additional Inherited Members</h2></td></tr>
 
 </div>
 </div>
+<a id="ac4a9bece1ec772bb5d87c1fcac1fb141" name="ac4a9bece1ec772bb5d87c1fcac1fb141"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ac4a9bece1ec772bb5d87c1fcac1fb141">&#9670;&#160;</a></span>lookupAll()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">auto slang::netlist::NetlistGraph::lookupAll </td>
+          <td>(</td>
+          <td class="paramtype">std::string_view</td>          <td class="paramname"><span class="paramname"><em>name</em></span></td><td>)</td>
+          <td> const -&gt;  std::vector&lt; <a class="el" href="classslang_1_1netlist_1_1NetlistNode.html">NetlistNode</a> * &gt;</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel nodiscard">nodiscard</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
+<p>Lookup every node in the graph with exactly the hierarchical <code class="param">name</code>.</p>
+<p>Bit-aligned resolution can split one signal into several nodes, each covering a different bit range, so a whole-signal query has to consider them together. Nodes are ordered by ascending ID, which is stable for one graph but may differ between builds. </p>
+
+</div>
+</div>
+<a id="a5cf387f4adab4f1782bb3212f28912d2" name="a5cf387f4adab4f1782bb3212f28912d2"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a5cf387f4adab4f1782bb3212f28912d2">&#9670;&#160;</a></span>markBlackBoxPatternMatched()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void slang::netlist::NetlistGraph::markBlackBoxPatternMatched </td>
+          <td>(</td>
+          <td class="paramtype">size_t</td>          <td class="paramname"><span class="paramname"><em>index</em></span></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Record that the &ndash;black-box pattern at <code class="param">index</code> matched an instance. </p>
+
+</div>
+</div>
 <a id="a3f999a9476b7f8c4e65b56ebc8c3d3bf" name="a3f999a9476b7f8c4e65b56ebc8c3d3bf"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a3f999a9476b7f8c4e65b56ebc8c3d3bf">&#9670;&#160;</a></span>mergeParallelEdges()</h2>
 
@@ -711,6 +850,25 @@ Additional Inherited Members</h2></td></tr>
 </div><div class="memdoc">
 <p>Collapse parallel edges that carry abutting or overlapping ranges of the same symbol into one edge spanning the union of their ranges.</p>
 <p>Only edges sharing a source, a target, a symbol and an edge kind are combined, so connectivity is unchanged. Run as the last step of <a class="el" href="#affc868eee760749d677c67049bcf2e9f">build()</a>, where it establishes the invariant that each (source, target, symbol, edge kind) relation holds one edge per maximal contiguous range, regardless of the order in which those ranges were emitted. Edges added afterwards may break that invariant. </p>
+
+</div>
+</div>
+<a id="a85175bbd49cd5281a50ae3cc46f0ccdc" name="a85175bbd49cd5281a50ae3cc46f0ccdc"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a85175bbd49cd5281a50ae3cc46f0ccdc">&#9670;&#160;</a></span>setBlackBoxPatterns()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">void slang::netlist::NetlistGraph::setBlackBoxPatterns </td>
+          <td>(</td>
+          <td class="paramtype">std::vector&lt; std::string &gt;</td>          <td class="paramname"><span class="paramname"><em>patterns</em></span></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Record the &ndash;black-box patterns the build was configured with. </p>
 
 </div>
 </div>
