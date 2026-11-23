@@ -192,7 +192,7 @@ endmodule
   REQUIRE_FALSE(drivers.empty());
   for (auto *node : drivers) {
     auto path = node->getHierarchicalPath();
-    CHECK_FALSE((path.has_value() && *path == "m.r"));
+    CHECK_FALSE((path.has_value() && std::string(*path) == "m.r"));
   }
 }
 
@@ -228,7 +228,7 @@ endmodule
   CHECK(drivers[1].bounds.lower() == 1);
   for (auto const &driver : drivers) {
     auto path = driver.driver->getHierarchicalPath();
-    CHECK_FALSE((path.has_value() && *path == "top.q"));
+    CHECK_FALSE((path.has_value() && std::string(*path) == "top.q"));
   }
 }
 
@@ -275,7 +275,7 @@ endmodule
   REQUIRE(drivers.size() == 1);
   auto path = drivers[0].driver->getHierarchicalPath();
   REQUIRE(path.has_value());
-  CHECK(*path == "top.a");
+  CHECK(std::string(*path) == "top.a");
   CHECK(drivers[0].bounds.lower() == 0);
   CHECK(drivers[0].bounds.upper() == 1);
 }
