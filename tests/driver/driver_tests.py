@@ -818,6 +818,15 @@ comb-loop.sv:10:10: note: assignment
         self.assertIn("note: inout port p", r.stdout)
         self.assertIn("note: output port q", r.stdout)
 
+    def test_path_to_same_node(self):
+        result = self.run_tool(
+            "rca.sv", "--from", "rca.i_op0", "--to", "rca.i_op0", "--format", "json"
+        )
+        steps = json.loads(result.stdout)
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]["type"], "node")
+        self.assertEqual(steps[0]["path"], "rca.i_op0")
+
     def test_path_format_json(self):
         r = self.run_tool(
             "rca.sv", "--from", "rca.i_op0", "--to", "rca.o_sum",
