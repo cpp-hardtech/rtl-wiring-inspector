@@ -11,7 +11,7 @@ env:
 
 jobs:
   benchmark:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
 
@@ -21,8 +21,9 @@ jobs:
 
     - name: Install dependencies
       run: |
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-        sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main"
+        wget -q https://apt.llvm.org/llvm-snapshot.gpg.key -O "$RUNNER_TEMP/llvm-snapshot.asc"
+        sudo install -D -m 0644 "$RUNNER_TEMP/llvm-snapshot.asc" /etc/apt/keyrings/llvm-snapshot.asc
+        echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list > /dev/null
         sudo apt-get update
         sudo apt-get install -y clang-21 ccache
         pip install pyyaml tabulate
@@ -43,7 +44,9 @@ jobs:
             ${{ github.workflow }}-cmake-deps-
 
     - name: Configure CMake
-      run: cmake --preset=clang-release -DENABLE_EXTERNAL_TESTS=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      run: >-
+        cmake --preset=clang-release -DENABLE_EXTERNAL_TESTS=ON
+        -DCMAKE_CXX_COMPILER=clang++-21 -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
       run: cmake --build build/clang-release

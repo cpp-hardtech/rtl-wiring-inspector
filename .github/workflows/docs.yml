@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: documentation-gh-pages
+  cancel-in-progress: false
+
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/cpm_modules
 
@@ -36,7 +40,19 @@ jobs:
           cmake --preset=docs
           cmake --build build/docs --target docs
 
+      - name: Check publishing revision
+        id: publishing-revision
+        run: |
+          ref=$(git ls-remote --exit-code origin "$GITHUB_REF")
+          read -r main_sha _ <<< "$ref"
+          if [[ "$GITHUB_SHA" == "$main_sha" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping documentation publication for a superseded main commit."
+          fi
+
       - name: Publish
+        if: steps.publishing-revision.outputs.current == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

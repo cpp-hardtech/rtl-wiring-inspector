@@ -9,20 +9,18 @@ on:
 
 jobs:
   linux-coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
     - name: Install dependencies
       run: |
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-        sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main"
-        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+        wget -q https://apt.llvm.org/llvm-snapshot.gpg.key -O "$RUNNER_TEMP/llvm-snapshot.asc"
+        sudo install -D -m 0644 "$RUNNER_TEMP/llvm-snapshot.asc" /etc/apt/keyrings/llvm-snapshot.asc
+        echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list > /dev/null
         sudo apt-get update
-        sudo apt-get install -y clang-21 llvm-21 llvm-21-dev
-        sudo ln -s /usr/bin/llvm-cov-21 /usr/bin/llvm-cov
-        sudo ln -s /usr/bin/llvm-profdata-21 /usr/bin/llvm-profdata
+        sudo apt-get install -y clang-21 llvm-21
 
     # Cache CMake dependencies
     - uses: actions/cache@v3
@@ -33,7 +31,10 @@ jobs:
             ${{ github.workflow }}-cmake-deps-
 
     - name: Configure CMake
-      run: cmake --preset=clang-coverage
+      run: >-
+        cmake --preset=clang-coverage
+        -DLLVM_PROFDATA_PATH=/usr/bin/llvm-profdata-21
+        -DLLVM_COV_PATH=/usr/bin/llvm-cov-21
 
     - name: Build
       run: cmake --build build/clang-coverage
