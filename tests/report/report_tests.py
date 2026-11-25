@@ -279,6 +279,28 @@ rca.genblk1[6].i                         rca.sv:18:15
         sum_var = by_name["rca.sum"]
         self.assertEqual(sum_var["drivers"], 7)
 
+    def test_fixed_size_widths(self):
+        ports = self.run_report("widths.sv", "--ports", "--format", "json")
+        port_widths = {port["name"]: port["width"] for port in json.loads(ports.stdout)}
+        self.assertEqual(
+            port_widths,
+            {"widths.packed_input": 8, "widths.samples": 24, "widths.result": 8},
+        )
+
+        variables = self.run_report("widths.sv", "--variables", "--format", "json")
+        widths = {var["name"]: var["width"] for var in json.loads(variables.stdout)}
+        for name, expected in {
+            "packed_input": 8,
+            "samples": 24,
+            "history": 40,
+            "fixed_record": 6,
+            "dynamic_samples": 0,
+            "dynamic_record": 0,
+            "period": 64,
+        }.items():
+            with self.subTest(variable=name):
+                self.assertEqual(widths[f"widths.{name}"], expected)
+
     def test_drivers_json(self):
         result = subprocess.run(
             [self.executable, "rca.sv", "--drivers", "--format", "json"],

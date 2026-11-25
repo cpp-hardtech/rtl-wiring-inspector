@@ -66,7 +66,7 @@ public:
     items.push_back(PortInfo{
         .name = std::move(path),
         .direction = symbol.direction,
-        .width = symbol.getType().getBitWidth(),
+        .width = reportWidth(symbol.getType()),
         .netType = portNetTypeName(symbol),
         .location = symbol.location,
     });
