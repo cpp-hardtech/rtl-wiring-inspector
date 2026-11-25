@@ -286,6 +286,10 @@ exactly one of the following actions:
 - @c --ast-json @c \<file\>: dump the compiled AST as JSON to the given
   file (@c - for stdout). Table output is not meaningful for this mode.
 
+Port and variable widths are the total bit counts of fixed-size types,
+including unpacked arrays and structs. Types without a statically known
+size report a width of @c 0.
+
 Passing more than one action is an error.
 
 @par Output format

@@ -30,7 +30,7 @@ class ReportVariables
     items.push_back(VariableInfo{
         .name = std::move(path),
         .type = symbol.getType().toString(),
-        .width = symbol.getType().getBitWidth(),
+        .width = reportWidth(symbol.getType()),
         .kind = std::move(kind),
         .drivers =
             analysisManager.getDrivers(canonicalValueSymbol(symbol)).size(),

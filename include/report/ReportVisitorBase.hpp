@@ -46,6 +46,10 @@ protected:
     return netlist::Utilities::locationStr(compilation, loc);
   }
 
+  static auto reportWidth(ast::Type const &type) -> uint64_t {
+    return type.isFixedSize() ? type.getBitstreamWidth() : 0;
+  }
+
   /// Return true if no name filters are set, or if @p name matches at
   /// least one of them (glob syntax per netlist::wildcardMatch).
   auto nameMatches(std::string_view name) const -> bool {
