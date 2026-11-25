@@ -38,6 +38,16 @@ module m(input logic a, output logic [3:0] y,
 endmodule
 """
 
+CONST_STATE_SV = """\
+module m(input logic clk, input logic [3:0] d,
+         output logic [3:0] mux_value, output logic [4:0] packed_value);
+  logic [3:0] q;
+  always_ff @(posedge clk) q <= d;
+  assign mux_value = q[0] ? q : 4'd3;
+  assign packed_value = {q, 1'b1};
+endmodule
+"""
+
 EXPAND_OPS_SV = """\
 module m(input logic [7:0] a, input logic [7:0] b, input logic [7:0] c,
          output logic [7:0] y);
@@ -518,6 +528,14 @@ module t(input x, output y);
 
     def test_constant_drivers_nonexistent(self):
         self.assert_fails("rca.sv", "--constant-drivers", "rca.nonexistent")
+
+    def test_constant_drivers_with_register_input(self):
+        for name in ("m.mux_value", "m.packed_value"):
+            with self.subTest(name=name):
+                result = self.run_tool(
+                    "--constant-drivers", name, "--format", "json", source=CONST_STATE_SV
+                )
+                self.assertEqual(json.loads(result.stdout), [])
 
     def test_expand_operations_in_path(self):
         r = self.run_tool(

@@ -404,7 +404,14 @@ auto NetlistGraph::getSensitivity(NetlistNode &node) const
 
 auto NetlistGraph::getConstantDrivers(NetlistNode &node) const
     -> std::vector<NetlistNode *> {
-  auto fanIn = getCombFanIn(node);
+  // Visit register outputs as non-constant sources without following their
+  // data and clock inputs.
+  std::vector<NetlistNode *> fanIn;
+  CollectVisitor visitor(fanIn);
+  DepthFirstSearch<NetlistNode, NetlistEdge, CollectVisitor, CombFanPredicate,
+                   Direction::Backward>
+      dfs(visitor, node);
+
   std::vector<NetlistNode *> constants;
   for (auto *n : fanIn) {
     if (n == &node) {
