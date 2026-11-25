@@ -1226,7 +1226,8 @@ auto main(int argc, char **argv) -> int {
       if (filtered.empty()) {
         buffer.format("No combinational loops detected in the design.\n");
       } else {
-        for (auto const &cycle : filtered) {
+        for (auto &cycle : filtered) {
+          cycle.push_back(cycle.front());
           buffer.format("Combinational loop detected:\n\n");
           buffer.format("{}\n",
                         reportPath(graph.fileTable, diagnostics.get(), cycle));

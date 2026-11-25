@@ -313,6 +313,12 @@ comb-loop.sv:8:11: note: value m.b[0]
 comb-loop.sv:10:10: note: assignment
   assign a = b;
          ^
+comb-loop.sv:8:8: note: value m.a[0]
+  wire a, b;
+       ^
+comb-loop.sv:3:16: note: input port x
+module t(input x, output y);
+               ^
 """,
                 r.stdout,
             )
@@ -348,6 +354,9 @@ comb-loop.sv:10:10: note: assignment
             self.run_tool("comb-loop.sv", "--save-netlist", netlist)
             r = self.run_tool("--load-netlist", netlist, "--comb-loops")
         self.assertIn("Combinational loop detected:", r.stdout)
+        notes = [line for line in r.stdout.splitlines() if ": note: " in line]
+        self.assertIn("note: value m.a[0]", notes[-2])
+        self.assertEqual(notes[0], notes[-1])
 
     def test_load_netlist_registers(self):
         with self.temp_path(".json") as netlist:
