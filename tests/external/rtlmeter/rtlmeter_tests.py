@@ -181,13 +181,13 @@ def format_bytes(n: Optional[int]) -> str:
     return f"{n:.1f} TiB"
 
 
-def parse_stats(stdout: str) -> Optional[dict]:
+def parse_stats(stderr: str) -> Optional[dict]:
     """
     Extract the JSON stats object emitted by rtl-wiring-inspector --stats-json.
 
     Returns the parsed dict or None if the stats line is not found.
     """
-    for line in stdout.splitlines():
+    for line in stderr.splitlines():
         line = line.strip()
         if line.startswith("{") and "time_seconds" in line:
             return json.loads(line)
@@ -208,7 +208,7 @@ def run_once(
     if extra_args:
         cmd.extend(extra_args)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    stats = parse_stats(result.stdout) if result.returncode == 0 else None
+    stats = parse_stats(result.stderr) if result.returncode == 0 else None
     return stats, result.returncode, result.stderr
 
 
