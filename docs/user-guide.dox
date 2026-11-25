@@ -276,6 +276,9 @@ exactly one of the following actions:
 - @c --ports: list every port (direction, hierarchical path, width, net
   type, source location). The net type is the underlying nettype name
   (@c wire, @c wand, ...) for net ports and @c var for variable ports.
+  A concatenated non-ANSI port has one entry with its total width and
+  effective direction. Its net type is @c mixed when its members use
+  different net types or combine nets with variables.
 - @c --variables: list every variable and net declaration (name, declared
   type, width, kind, driver count, source location). Kind is @c var for
   variable symbols and the nettype name for nets. The driver count is

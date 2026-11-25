@@ -29,6 +29,20 @@ class ReportPorts : public ReportVisitorBase<ReportPorts, PortInfo> {
     return "var";
   }
 
+  static auto portNetTypeName(ast::MultiPortSymbol const &symbol)
+      -> std::string {
+    if (symbol.ports.empty()) {
+      return "var";
+    }
+    auto netType = portNetTypeName(*symbol.ports.front());
+    for (auto const *port : symbol.ports.subspan(1)) {
+      if (portNetTypeName(*port) != netType) {
+        return "mixed";
+      }
+    }
+    return netType;
+  }
+
 public:
   using ReportVisitorBase::ReportVisitorBase;
 
@@ -56,6 +70,20 @@ public:
     writer.writeProperty("location");
     writer.writeValue(locationStr(port.location));
     writer.endObject();
+  }
+
+  void handle(const ast::MultiPortSymbol &symbol) {
+    auto path = symbol.getHierarchicalPath();
+    if (!acceptSymbol(symbol, path)) {
+      return;
+    }
+    items.push_back(PortInfo{
+        .name = std::move(path),
+        .direction = symbol.direction,
+        .width = symbol.getType().getBitWidth(),
+        .netType = portNetTypeName(symbol),
+        .location = symbol.location,
+    });
   }
 
   void handle(const ast::PortSymbol &symbol) {
