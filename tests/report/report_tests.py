@@ -254,6 +254,34 @@ rca.genblk1[6].i                         rca.sv:18:15
         self.assertEqual(data[-1]["name"], "rca.o_co")
         self.assertEqual(data[-1]["direction"], "Out")
 
+    def test_nonansi_concatenated_ports(self):
+        result = self.run_report("nonansi_ports.sv", "--ports", "--format", "json")
+        ports = json.loads(result.stdout)
+        self.assertEqual(
+            [(p["name"], p["direction"], p["width"], p["netType"]) for p in ports],
+            [
+                ("legacy_ports.data_in", "In", 5, "wire"),
+                ("legacy_ports.control", "In", 1, "wire"),
+                ("legacy_ports.data_out", "Out", 4, "var"),
+                ("legacy_ports.mixed_out", "Out", 3, "mixed"),
+            ],
+        )
+        self.assertTrue(ports[0]["location"].startswith("nonansi_ports.sv:2:"))
+
+        filtered = self.run_report(
+            "nonansi_ports.sv",
+            "--ports",
+            "--format",
+            "json",
+            "--scope",
+            "legacy_ports",
+            "--scope",
+            "legacy_*",
+            "--name",
+            "legacy_ports.data_*",
+        )
+        self.assertEqual(json.loads(filtered.stdout), [ports[0], ports[2]])
+
     def test_variables_json(self):
         result = subprocess.run(
             [self.executable, "rca.sv", "--variables", "--format", "json"],
