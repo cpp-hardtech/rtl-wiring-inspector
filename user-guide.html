@@ -185,11 +185,12 @@ rtl-report</h2>
 <p><code>rtl-report</code> is the companion tool to <code>rtl-wiring-inspector</code>: it surfaces AST-level information so that while you are exploring a design with <code>rtl-wiring-inspector</code> you can pivot to a question about the underlying source, such as "what type is this variable", "how wide is this port" or "who
 drives this signal", without re-compiling. It runs reports against the elaborated AST and accepts the standard slang compilation options plus exactly one of the following actions:</p>
 <ul>
-<li><code>--ports:</code> list every port (direction, hierarchical path, width, net type, source location). The net type is the underlying nettype name (<code>wire</code>, <code>wand</code>, ...) for net ports and <code>var</code> for variable ports.</li>
+<li><code>--ports:</code> list every port (direction, hierarchical path, width, net type, source location). The net type is the underlying nettype name (<code>wire</code>, <code>wand</code>, ...) for net ports and <code>var</code> for variable ports. A concatenated non-ANSI port has one entry with its total width and effective direction. Its net type is <code>mixed</code> when its members use different net types or combine nets with variables.</li>
 <li><code>--variables:</code> list every variable and net declaration (name, declared type, width, kind, driver count, source location). Kind is <code>var</code> for variable symbols and the nettype name for nets. The driver count is taken from slang's analysis pass, so this action triggers analysis.</li>
 <li><code>--drivers:</code> for every value symbol, list each known driver with its bit range, driving expression, kind (<code>proc</code> for procedural, <code>cont</code> for continuous), and source location. Triggers analysis.</li>
 <li><code>--ast-json</code> <code>&lt;file&gt;</code>: dump the compiled AST as JSON to the given file (<code>-</code> for stdout). Table output is not meaningful for this mode.</li>
 </ul>
+<p>Port and variable widths are the total bit counts of fixed-size types, including unpacked arrays and structs. Types without a statically known size report a width of <code>0</code>.</p>
 <p>Passing more than one action is an error.</p>
 <dl class="section user"><dt>Output format</dt><dd>Use <code>--format</code> <code>table</code> (the default) or <code>--format</code> <code>json</code> on the three tabular actions to choose human-readable columns or machine-readable JSON. <code>--ast-json</code> is always JSON. The JSON drivers report nests the per-value drivers under each value entry. An unknown <code>--format</code> value is rejected regardless of the selected action; a valid value is ignored by <code>--ast-json</code>.</dd></dl>
 <dl class="section user"><dt>Output destination</dt><dd>By default the tabular actions print to stdout; pass <code>-o</code> / <code>--output</code> <code>&lt;file&gt;</code> to redirect to a file (use <code>-</code> for stdout). <code>--ast-json</code> takes its file path directly on the flag.</dd></dl>
@@ -280,7 +281,47 @@ Querying the graph</h2>
 <div class="line"><span class="comment"># Combinational fan-out / fan-in (stops at State nodes).</span></div>
 <div class="line">fan_out = graph.get_comb_fan_out(node)</div>
 <div class="line">fan_in  = graph.get_comb_fan_in(node)</div>
-</div><!-- fragment --><p><code>NetlistGraph::getBitDrivers</code> (per-bit, non-deduplicated drivers) and the black-box coverage API (<code>getBlackBoxPaths</code> / <code>getBlackBoxCoverage</code>) are C++-only and not currently exposed through the Python bindings.</p>
+<div class="line"> </div>
+<div class="line"><span class="comment"># Per-bit drivers keep one entry per contributing edge, clipped to the</span></div>
+<div class="line"><span class="comment"># sub-range of the queried symbol that the driver covers.</span></div>
+<div class="line"><span class="keywordflow">for</span> bit_driver <span class="keywordflow">in</span> graph.get_bit_drivers(<span class="stringliteral">&quot;m.y&quot;</span>):</div>
+<div class="line">    lower, upper = bit_driver.bounds</div>
+<div class="line">    print(lower, upper, bit_driver.driver.kind)</div>
+<div class="line"> </div>
+<div class="line"><span class="comment"># Restrict the query to a bit range.</span></div>
+<div class="line">bit_drivers = graph.get_bit_drivers(<span class="stringliteral">&quot;m.y&quot;</span>, 3, 5)</div>
+<div class="line"> </div>
+<div class="line"><span class="comment"># Traverse the edges attached to a node. Each edge exposes its source and</span></div>
+<div class="line"><span class="comment"># target nodes, the driven symbol, and the clock sensitivity.</span></div>
+<div class="line"><span class="keywordflow">for</span> edge <span class="keywordflow">in</span> node.out_edges:</div>
+<div class="line">    print(edge.source.ID, edge.target.ID, edge.edge_kind, edge.symbol_path)</div>
+<div class="line"><span class="keywordflow">for</span> edge <span class="keywordflow">in</span> node.in_edges:</div>
+<div class="line">    print(edge.source.ID, edge.target.ID, edge.bounds, edge.disabled)</div>
+</div><!-- fragment --><h2 class="doxsection"><a class="anchor" id="python-serialization"></a>
+Saving and loading netlists</h2>
+<p><code>NetlistSerializer</code> reads and writes the same versioned JSON format as the <code>--save-netlist</code> and <code>--load-netlist</code> CLI options, so a netlist saved by either side can be loaded by the other.</p>
+<div class="fragment"><div class="line"><span class="comment"># Serialise to the versioned JSON format.</span></div>
+<div class="line">text = rtl_wiring_inspector.NetlistSerializer.serialize(graph)</div>
+<div class="line"> </div>
+<div class="line"><span class="comment"># Restore it into a new, empty graph.</span></div>
+<div class="line">loaded = rtl_wiring_inspector.NetlistGraph()</div>
+<div class="line">rtl_wiring_inspector.NetlistSerializer.deserialize(text, loaded)</div>
+</div><!-- fragment --><p>The destination graph must be empty. Malformed JSON, a missing field, and an unsupported format version raise <code>RuntimeError</code>. The <code>blackBoxes</code> field is round-tripped too, so <a class="el" href="#python-black-boxes" title="Black-box coverage">Black-box coverage</a> coverage queries work on a loaded graph.</p>
+<h2 class="doxsection"><a class="anchor" id="python-black-boxes"></a>
+Black-box coverage</h2>
+<p><code>NetlistGraph.build</code> accepts a <code>black_boxes</code> list as described in <a class="el" href="#black-boxes" title="Black-boxed instances">Black-boxed instances</a>. The graph records the resolved hierarchical path of each black-boxed instance and classifies nodes against those paths:</p>
+<div class="fragment"><div class="line">graph.build(compilation, am, black_boxes=[<span class="stringliteral">&quot;ram_*&quot;</span>, <span class="stringliteral">&quot;top.cpu.fpu&quot;</span>])</div>
+<div class="line"> </div>
+<div class="line">print(graph.get_black_box_paths())</div>
+<div class="line"> </div>
+<div class="line">coverage = graph.get_black_box_coverage(graph.lookup(<span class="stringliteral">&quot;top.cpu.fpu.rdata&quot;</span>))</div>
+<div class="line"><span class="keywordflow">if</span> coverage == rtl_wiring_inspector.BlackBoxCoverage.Boundary:</div>
+<div class="line">    print(<span class="stringliteral">&quot;port on the black-box boundary&quot;</span>)</div>
+<div class="line"><span class="keywordflow">elif</span> coverage == rtl_wiring_inspector.BlackBoxCoverage.Contained:</div>
+<div class="line">    print(<span class="stringliteral">&quot;inside the black box&quot;</span>)</div>
+<div class="line"><span class="keywordflow">else</span>:</div>
+<div class="line">    print(<span class="stringliteral">&quot;outside every black box&quot;</span>)</div>
+</div><!-- fragment --><p><code>BlackBoxCoverage.Outside</code> covers nodes outside every box (including nodes without a hierarchical path), <code>Boundary</code> a port directly below a black box, and <code>Contained</code> anything else at or below one.</p>
 <h2 class="doxsection"><a class="anchor" id="python-pathfinding"></a>
 Path finding</h2>
 <div class="fragment"><div class="line">finder = rtl_wiring_inspector.PathFinder()</div>
@@ -294,7 +335,8 @@ Path finding</h2>
 <div class="line"><span class="keywordflow">if</span> <span class="keywordflow">not</span> path.empty():</div>
 <div class="line">    <span class="keywordflow">for</span> node <span class="keywordflow">in</span> path:</div>
 <div class="line">        print(node.kind, getattr(node, <span class="stringliteral">&quot;path&quot;</span>, <span class="stringliteral">&quot;&quot;</span>))</div>
-</div><!-- fragment --><h2 class="doxsection"><a class="anchor" id="python-iterating"></a>
+</div><!-- fragment --><p><code>path.front()</code>, <code>path.back()</code> and indexing with <code>path</code>[i] raise <code>IndexError</code> when the path is empty or the index is out of range.</p>
+<h2 class="doxsection"><a class="anchor" id="python-iterating"></a>
 Iterating over nodes</h2>
 <div class="fragment"><div class="line"><span class="comment"># Iterate all nodes.</span></div>
 <div class="line"><span class="keywordflow">for</span> node <span class="keywordflow">in</span> graph:</div>
@@ -311,8 +353,8 @@ Iterating over nodes</h2>
 <li><code>Constant:</code> <code>width</code>, <code>value</code> (string form of the constant value). Created for literal RHSs, constant-foldable expressions, zero-extension padding bits, literal port connections, and constant arms of conditional operators.</li>
 <li><code>Assignment</code>, <code>Conditional</code>, <code>Case</code>, <code>Merge:</code> no additional properties</li>
 </ul>
-<p>The <code>bounds</code> property on nodes and edges is a <code>DriverBitRange</code> with <code>lower</code>, <code>upper</code>, and <code>width</code> accessors; it also unpacks as a <code></code>(lower, <code>upper</code>) tuple.</p>
-<p>Edge properties: <code>symbol_name</code>, <code>symbol_path</code>, <code>bounds</code>, <code>disabled</code>.</p>
+<p>The <code>bounds</code> property on nodes and edges is a <code>DriverBitRange</code> with <code>lower</code>, <code>upper</code>, and <code>width</code> accessors; it also unpacks as a <code></code>(lower, <code>upper</code>) tuple. A <code>BitDriver</code> from <code>NetlistGraph.get_bit_drivers</code> has the same <code>bounds</code> property plus a <code>driver</code> node reference.</p>
+<p>Every node exposes <code>out_edges</code> and <code>in_edges</code> as lists of <code>NetlistEdge</code> references. Edge properties: <code>source</code>, <code>target</code>, <code>edge_kind</code> (a <code>pyslang.ast.EdgeKind</code> clock sensitivity), <code>symbol_name</code>, <code>symbol_path</code>, <code>bounds</code>, <code>disabled</code>. Edge and node references are views into the graph, so keep the owning <code>NetlistGraph</code> alive while using them.</p>
 <h1 class="doxsection"><a class="anchor" id="performance"></a>
 Performance tuning</h1>
 <h2 class="doxsection"><a class="anchor" id="perf-threads"></a>
@@ -377,7 +419,8 @@ Black-boxed instances</h2>
 </div><!-- fragment --><p>A pattern that matches no instance is reported as a warning on stderr and otherwise ignored; it does not change the netlist or the exit status. Both <code>--stats</code> and <code>--stats-json</code> report the requested patterns, the matched instance paths, and any unmatched patterns.</p>
 <p>The Python equivalent passes a list of patterns to <code>NetlistGraph.build:</code> </p>
 <div class="fragment"><div class="line">graph.build(compilation, am, black_boxes=[<span class="stringliteral">&quot;ram_*&quot;</span>, <span class="stringliteral">&quot;top.cpu.fpu&quot;</span>])</div>
-</div><!-- fragment --><h2 class="doxsection"><a class="anchor" id="glob-syntax"></a>
+</div><!-- fragment --><p>The resolved paths and per-node classification are available from Python via <code>NetlistGraph.get_black_box_paths</code> and <code>NetlistGraph.get_black_box_coverage</code>; see <a class="el" href="#python-black-boxes" title="Black-box coverage">Black-box coverage</a>.</p>
+<h2 class="doxsection"><a class="anchor" id="glob-syntax"></a>
 Glob pattern syntax</h2>
 <p>Glob patterns are used to match hierarchical names by the <code>--black-box</code> and <code>--find</code> CLI flags, by the <code>black_boxes</code> argument to <code>NetlistGraph.build</code>, and by <code>NetlistGraph::findNodes</code>. Names are treated as dot-separated path segments (for example <code>top.sub.signal</code> is three segments).</p>
 <p>The supported wildcards are:</p>

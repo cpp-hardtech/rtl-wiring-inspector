@@ -8,6 +8,7 @@ var searchData=
   ['reportdrivers_5',['ReportDrivers',['../classslang_1_1report_1_1ReportDrivers.html#aa65debda464880e75ae37f9679c35b7b',1,'slang::report::ReportDrivers']]],
   ['reportvariables_6',['ReportVariables',['../classslang_1_1report_1_1ReportVariables.html#af97f40cc9c76b4d2a77c2632800b23d4',1,'slang::report::ReportVariables']]],
   ['reportvisitorbase_7',['ReportVisitorBase',['../classslang_1_1report_1_1ReportVisitorBase.html#a0f102fb6516ad8b043b617e1b957429c',1,'slang::report::ReportVisitorBase::ReportVisitorBase()'],['../classslang_1_1report_1_1ReportPorts.html#a0f102fb6516ad8b043b617e1b957429c',1,'slang::report::ReportPorts::ReportVisitorBase()']]],
-  ['reserve_8',['reserve',['../classslang_1_1netlist_1_1FileTable.html#ae10140ca34e79d664c0a4b084a2deb46',1,'slang::netlist::FileTable']]],
-  ['reverse_9',['reverse',['../classslang_1_1netlist_1_1NetlistPath.html#a18d5848e26ade205072a0b590b7cd360',1,'slang::netlist::NetlistPath']]]
+  ['reportwidth_8',['reportWidth',['../classslang_1_1report_1_1ReportVisitorBase.html#a6968a0f7e5d90004073442f7492a5af4',1,'slang::report::ReportVisitorBase']]],
+  ['reserve_9',['reserve',['../classslang_1_1netlist_1_1FileTable.html#ae10140ca34e79d664c0a4b084a2deb46',1,'slang::netlist::FileTable']]],
+  ['reverse_10',['reverse',['../classslang_1_1netlist_1_1NetlistPath.html#a18d5848e26ade205072a0b590b7cd360',1,'slang::netlist::NetlistPath']]]
 ];

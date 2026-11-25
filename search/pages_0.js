@@ -5,7 +5,8 @@ var searchData=
   ['analysis_20and_20queries_2',['Analysis and queries',['../developer-guide.html#arch-analysis',1,'']]],
   ['analysis_20model_3',['Analysis model',['../user-guide.html#analysis-model',1,'']]],
   ['and_20contributions_4',['Support and contributions',['../index.html#support-contributions',1,'']]],
-  ['and_20queries_5',['Analysis and queries',['../developer-guide.html#arch-analysis',1,'']]],
-  ['and_20serialization_6',['Export and serialization',['../user-guide.html#cli-export',1,'']]],
-  ['architecture_7',['Architecture',['../developer-guide.html#architecture',1,'']]]
+  ['and_20loading_20netlists_5',['Saving and loading netlists',['../user-guide.html#python-serialization',1,'']]],
+  ['and_20queries_6',['Analysis and queries',['../developer-guide.html#arch-analysis',1,'']]],
+  ['and_20serialization_7',['Export and serialization',['../user-guide.html#cli-export',1,'']]],
+  ['architecture_8',['Architecture',['../developer-guide.html#architecture',1,'']]]
 ];

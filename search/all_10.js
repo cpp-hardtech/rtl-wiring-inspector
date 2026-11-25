@@ -24,11 +24,12 @@ var searchData=
   ['reportvisitorbase_3c_20reportdrivers_2c_20valueinfo_20_3e_21',['ReportVisitorBase&lt; ReportDrivers, ValueInfo &gt;',['../classslang_1_1report_1_1ReportVisitorBase.html',1,'slang::report']]],
   ['reportvisitorbase_3c_20reportports_2c_20portinfo_20_3e_22',['ReportVisitorBase&lt; ReportPorts, PortInfo &gt;',['../classslang_1_1report_1_1ReportVisitorBase.html',1,'slang::report']]],
   ['reportvisitorbase_3c_20reportvariables_2c_20variableinfo_20_3e_23',['ReportVisitorBase&lt; ReportVariables, VariableInfo &gt;',['../classslang_1_1report_1_1ReportVisitorBase.html',1,'slang::report']]],
-  ['reserve_24',['reserve',['../classslang_1_1netlist_1_1FileTable.html#ae10140ca34e79d664c0a4b084a2deb46',1,'slang::netlist::FileTable']]],
-  ['resolution_25',['resolution',['../user-guide.html#bit-dependency-resolution',1,'Bit dependency resolution'],['../developer-guide.html#internals-bit-aligned',1,'Bit dependency resolution']]],
-  ['resolveassignbits_26',['resolveAssignBits',['../structslang_1_1netlist_1_1BuilderOptions.html#ae51531472066ce7f5637daf9b2cad576',1,'slang::netlist::BuilderOptions']]],
-  ['reverse_27',['reverse',['../classslang_1_1netlist_1_1NetlistPath.html#a18d5848e26ade205072a0b590b7cd360',1,'slang::netlist::NetlistPath']]],
-  ['row_28',['Row',['../structslang_1_1netlist_1_1Utilities.html#a4b0bf762ffe3b344565f5da7e9114e00',1,'slang::netlist::Utilities']]],
-  ['rtl_20report_29',['rtl-report',['../user-guide.html#cli-report',1,'']]],
-  ['rtl_20wiring_20inspector_30',['rtl wiring inspector',['../user-guide.html#cli-general',1,'General options (rtl-wiring-inspector)'],['../index.html',1,'rtl-wiring-inspector']]]
+  ['reportwidth_24',['reportWidth',['../classslang_1_1report_1_1ReportVisitorBase.html#a6968a0f7e5d90004073442f7492a5af4',1,'slang::report::ReportVisitorBase']]],
+  ['reserve_25',['reserve',['../classslang_1_1netlist_1_1FileTable.html#ae10140ca34e79d664c0a4b084a2deb46',1,'slang::netlist::FileTable']]],
+  ['resolution_26',['resolution',['../user-guide.html#bit-dependency-resolution',1,'Bit dependency resolution'],['../developer-guide.html#internals-bit-aligned',1,'Bit dependency resolution']]],
+  ['resolveassignbits_27',['resolveAssignBits',['../structslang_1_1netlist_1_1BuilderOptions.html#ae51531472066ce7f5637daf9b2cad576',1,'slang::netlist::BuilderOptions']]],
+  ['reverse_28',['reverse',['../classslang_1_1netlist_1_1NetlistPath.html#a18d5848e26ade205072a0b590b7cd360',1,'slang::netlist::NetlistPath']]],
+  ['row_29',['Row',['../structslang_1_1netlist_1_1Utilities.html#a4b0bf762ffe3b344565f5da7e9114e00',1,'slang::netlist::Utilities']]],
+  ['rtl_20report_30',['rtl-report',['../user-guide.html#cli-report',1,'']]],
+  ['rtl_20wiring_20inspector_31',['rtl wiring inspector',['../user-guide.html#cli-general',1,'General options (rtl-wiring-inspector)'],['../index.html',1,'rtl-wiring-inspector']]]
 ];

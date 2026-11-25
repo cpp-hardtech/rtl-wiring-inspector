@@ -1,8 +1,12 @@
 var NAVTREEINDEX4 =
 {
-"user-guide.html#python-iterating":[3,2,3],
-"user-guide.html#python-pathfinding":[3,2,2],
+"user-guide.html#python-bindings":[3,2],
+"user-guide.html#python-black-boxes":[3,2,3],
+"user-guide.html#python-building":[3,2,0],
+"user-guide.html#python-iterating":[3,2,5],
+"user-guide.html#python-pathfinding":[3,2,4],
 "user-guide.html#python-querying":[3,2,1],
+"user-guide.html#python-serialization":[3,2,2],
 "user-guide.html#sv-support":[3,4,4],
 "user-guide.html#use-cases":[3,5]
 };

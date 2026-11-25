@@ -1,5 +1,7 @@
 var NAVTREEINDEX3 =
 {
+"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da80594b6ca1740ffc423e83fb9e43dcd5":[5,0,0,0,34,7],
+"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da8418f52f187e4c145c00f0f1a1fc787b":[5,0,0,0,34,21],
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da87c80963dae5cd099e3a377e4d314b20":[5,0,0,0,34,1],
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da890ebf2ce6beb154deb673b3af2d03d4":[5,0,0,0,34,20],
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da902ee90d8a1e6e7ec67b049a1baacefe":[5,0,0,0,34,34],
@@ -247,7 +249,5 @@ var NAVTREEINDEX3 =
 "user-guide.html#perf-considerations":[3,3,2],
 "user-guide.html#perf-stats":[3,3,1],
 "user-guide.html#perf-threads":[3,3,0],
-"user-guide.html#performance":[3,3],
-"user-guide.html#python-bindings":[3,2],
-"user-guide.html#python-building":[3,2,0]
+"user-guide.html#performance":[3,3]
 };

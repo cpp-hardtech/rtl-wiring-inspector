@@ -40,6 +40,8 @@ var NAVTREE =
       [ "Python bindings", "user-guide.html#python-bindings", [
         [ "Building a graph", "user-guide.html#python-building", null ],
         [ "Querying the graph", "user-guide.html#python-querying", null ],
+        [ "Saving and loading netlists", "user-guide.html#python-serialization", null ],
+        [ "Black-box coverage", "user-guide.html#python-black-boxes", null ],
         [ "Path finding", "user-guide.html#python-pathfinding", null ],
         [ "Iterating over nodes", "user-guide.html#python-iterating", null ]
       ] ],
@@ -127,8 +129,8 @@ var NAVTREEINDEX =
 "BuildProfile_8hpp.html",
 "classslang_1_1netlist_1_1NetlistGraph.html#a1ad2d2fce85040c56e183ebe2b918a4a",
 "classslang_1_1netlist_1_1Port.html#a9d3e6111f37f7c86f73637d894e2ac85",
-"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da87c80963dae5cd099e3a377e4d314b20",
-"user-guide.html#python-iterating"
+"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da80594b6ca1740ffc423e83fb9e43dcd5",
+"user-guide.html#python-bindings"
 ];
 
 var SYNCONMSG = 'click to disable panel synchronization';

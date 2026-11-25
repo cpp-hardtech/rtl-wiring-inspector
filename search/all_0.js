@@ -12,13 +12,14 @@ var searchData=
   ['analysis_20and_20queries_9',['Analysis and queries',['../developer-guide.html#arch-analysis',1,'']]],
   ['analysis_20model_10',['Analysis model',['../user-guide.html#analysis-model',1,'']]],
   ['and_20contributions_11',['Support and contributions',['../index.html#support-contributions',1,'']]],
-  ['and_20queries_12',['Analysis and queries',['../developer-guide.html#arch-analysis',1,'']]],
-  ['and_20serialization_13',['Export and serialization',['../user-guide.html#cli-export',1,'']]],
-  ['append_14',['append',['../classslang_1_1netlist_1_1FormatBuffer.html#ae6f373e90b8105ff85999bcc64fea628',1,'slang::netlist::FormatBuffer::append(std::string_view str)'],['../classslang_1_1netlist_1_1FormatBuffer.html#a74688a2c2d618ab27511ceec80b11941',1,'slang::netlist::FormatBuffer::append(char ch)']]],
-  ['appenditemrows_15',['appendItemRows',['../classslang_1_1report_1_1ReportDrivers.html#a5e833a80eed54551ba41f8c1dd0058b7',1,'slang::report::ReportDrivers::appendItemRows()'],['../classslang_1_1report_1_1ReportPorts.html#ae675785d4f451fa23231c5bd1a75fa0d',1,'slang::report::ReportPorts::appendItemRows()'],['../classslang_1_1report_1_1ReportVariables.html#a9bf1bc6bb97ed56f0f912d0286e6bd95',1,'slang::report::ReportVariables::appendItemRows()']]],
-  ['architecture_16',['Architecture',['../developer-guide.html#architecture',1,'']]],
-  ['arithmeticshiftleft_17',['ArithmeticShiftLeft',['../namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6daad58e97c48adae200e2f93f415070237',1,'slang::netlist']]],
-  ['arithmeticshiftright_18',['ArithmeticShiftRight',['../namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da9ee667ea34c20f2e944d5575682a3874',1,'slang::netlist']]],
-  ['as_19',['as',['../classslang_1_1netlist_1_1NetlistNode.html#aa960e91bf8ad610aeea4937c01cc8dcb',1,'slang::netlist::NetlistNode::as() -&gt; T &amp;'],['../classslang_1_1netlist_1_1NetlistNode.html#abb93985b849f73281d2cc757911b5400',1,'slang::netlist::NetlistNode::as() const -&gt; const T &amp;']]],
-  ['assignment_20',['Assignment',['../classslang_1_1netlist_1_1Assignment.html',1,'slang::netlist::Assignment'],['../classslang_1_1netlist_1_1Assignment.html#a827193cff0b77aa5d0ed8da33dd375e9',1,'slang::netlist::Assignment::Assignment()'],['../namespaceslang_1_1netlist.html#af70e1b4b94ef56a8ec79732048337abbaf3b92fc0f97f128818cfb44321376bca',1,'slang::netlist::Assignment']]]
+  ['and_20loading_20netlists_12',['Saving and loading netlists',['../user-guide.html#python-serialization',1,'']]],
+  ['and_20queries_13',['Analysis and queries',['../developer-guide.html#arch-analysis',1,'']]],
+  ['and_20serialization_14',['Export and serialization',['../user-guide.html#cli-export',1,'']]],
+  ['append_15',['append',['../classslang_1_1netlist_1_1FormatBuffer.html#ae6f373e90b8105ff85999bcc64fea628',1,'slang::netlist::FormatBuffer::append(std::string_view str)'],['../classslang_1_1netlist_1_1FormatBuffer.html#a74688a2c2d618ab27511ceec80b11941',1,'slang::netlist::FormatBuffer::append(char ch)']]],
+  ['appenditemrows_16',['appendItemRows',['../classslang_1_1report_1_1ReportDrivers.html#a5e833a80eed54551ba41f8c1dd0058b7',1,'slang::report::ReportDrivers::appendItemRows()'],['../classslang_1_1report_1_1ReportPorts.html#ae675785d4f451fa23231c5bd1a75fa0d',1,'slang::report::ReportPorts::appendItemRows()'],['../classslang_1_1report_1_1ReportVariables.html#a9bf1bc6bb97ed56f0f912d0286e6bd95',1,'slang::report::ReportVariables::appendItemRows()']]],
+  ['architecture_17',['Architecture',['../developer-guide.html#architecture',1,'']]],
+  ['arithmeticshiftleft_18',['ArithmeticShiftLeft',['../namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6daad58e97c48adae200e2f93f415070237',1,'slang::netlist']]],
+  ['arithmeticshiftright_19',['ArithmeticShiftRight',['../namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da9ee667ea34c20f2e944d5575682a3874',1,'slang::netlist']]],
+  ['as_20',['as',['../classslang_1_1netlist_1_1NetlistNode.html#aa960e91bf8ad610aeea4937c01cc8dcb',1,'slang::netlist::NetlistNode::as() -&gt; T &amp;'],['../classslang_1_1netlist_1_1NetlistNode.html#abb93985b849f73281d2cc757911b5400',1,'slang::netlist::NetlistNode::as() const -&gt; const T &amp;']]],
+  ['assignment_21',['Assignment',['../classslang_1_1netlist_1_1Assignment.html',1,'slang::netlist::Assignment'],['../classslang_1_1netlist_1_1Assignment.html#a827193cff0b77aa5d0ed8da33dd375e9',1,'slang::netlist::Assignment::Assignment()'],['../namespaceslang_1_1netlist.html#af70e1b4b94ef56a8ec79732048337abbaf3b92fc0f97f128818cfb44321376bca',1,'slang::netlist::Assignment']]]
 ];

@@ -10,6 +10,7 @@ var searchData=
   ['construction_7',['Graph construction',['../developer-guide.html#arch-construction',1,'']]],
   ['contributions_8',['Support and contributions',['../index.html#support-contributions',1,'']]],
   ['cost_9',['Cost',['../developer-guide.html#internals-operations-cost',1,'']]],
-  ['cross_20port_20cut_20propagation_10',['Cross-port cut propagation',['../developer-guide.html#internals-cut-propagation',1,'']]],
-  ['cut_20propagation_11',['Cross-port cut propagation',['../developer-guide.html#internals-cut-propagation',1,'']]]
+  ['coverage_10',['Black-box coverage',['../user-guide.html#python-black-boxes',1,'']]],
+  ['cross_20port_20cut_20propagation_11',['Cross-port cut propagation',['../developer-guide.html#internals-cut-propagation',1,'']]],
+  ['cut_20propagation_12',['Cross-port cut propagation',['../developer-guide.html#internals-cut-propagation',1,'']]]
 ];

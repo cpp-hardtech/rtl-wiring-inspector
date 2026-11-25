@@ -31,6 +31,7 @@ var searchData=
   ['contributions_28',['Support and contributions',['../index.html#support-contributions',1,'']]],
   ['cost_29',['Cost',['../developer-guide.html#internals-operations-cost',1,'']]],
   ['count_30',['count',['../structslang_1_1netlist_1_1VisitAll.html#ae6e68854d321ffc61bcff0134e71a93a',1,'slang::netlist::VisitAll']]],
-  ['cross_20port_20cut_20propagation_31',['Cross-port cut propagation',['../developer-guide.html#internals-cut-propagation',1,'']]],
-  ['cut_20propagation_32',['Cross-port cut propagation',['../developer-guide.html#internals-cut-propagation',1,'']]]
+  ['coverage_31',['Black-box coverage',['../user-guide.html#python-black-boxes',1,'']]],
+  ['cross_20port_20cut_20propagation_32',['Cross-port cut propagation',['../developer-guide.html#internals-cut-propagation',1,'']]],
+  ['cut_20propagation_33',['Cross-port cut propagation',['../developer-guide.html#internals-cut-propagation',1,'']]]
 ];
