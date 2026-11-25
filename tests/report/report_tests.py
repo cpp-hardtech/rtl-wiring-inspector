@@ -741,6 +741,26 @@ rca.genblk1[6].i                         rca.sv:18:15
         data = json.loads(result.stdout)
         self.assertEqual(len(data), 6)
 
+    def test_disabled_actions_do_not_select_a_report(self):
+        for action in ("ports", "variables", "drivers"):
+            with self.subTest(action=action):
+                result = self.run_report("rca.sv", f"--{action}=false", check=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("no action specified", result.stderr)
+                self.assertEqual(result.stdout, "")
+
+    def test_disabled_actions_do_not_override_an_enabled_report(self):
+        expected = self.run_report("rca.sv", "--drivers", "--format", "json")
+        result = self.run_report(
+            "rca.sv",
+            "--ports=false",
+            "--variables=false",
+            "--drivers=true",
+            "--format",
+            "json",
+        )
+        self.assertEqual(json.loads(result.stdout), json.loads(expected.stdout))
+
     def test_multiple_actions_rejected(self):
         for args in (
             ("--variables", "--ports"),

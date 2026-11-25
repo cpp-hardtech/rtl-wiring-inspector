@@ -279,19 +279,19 @@ auto main(int argc, char **argv) -> int {
       }
     };
 
-    if (reportPorts) {
+    if (reportPorts == true) {
       ReportPorts visitor(*compilation);
       emit(visitor);
       return 0;
     }
 
     // Both --variables and --drivers need driver counts from analysis.
-    if (reportVariables || reportDrivers) {
+    if (reportVariables == true || reportDrivers == true) {
       auto analysisManager = driver.runAnalysis(*compilation);
       if (!driver.reportDiagnostics(true)) {
         return 1;
       }
-      if (reportVariables) {
+      if (reportVariables == true) {
         ReportVariables visitor(*compilation, *analysisManager);
         emit(visitor);
       } else {
