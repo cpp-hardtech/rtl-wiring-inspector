@@ -48,11 +48,12 @@ struct CombEdgePredicate {
 
 NetlistPath buildPath(TraversalMap &traversalMap, NetlistNode &startNode,
                       NetlistNode &endNode) {
+  // The DFS root has no parent entry.
+  if (&startNode == &endNode) {
+    return NetlistPath({&endNode});
+  }
   if (!traversalMap.contains(&endNode)) {
     return {};
-  }
-  if (startNode == endNode) {
-    return NetlistPath({&endNode});
   }
   NetlistPath path;
   auto *nextNode = &endNode;
