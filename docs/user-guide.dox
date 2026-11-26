@@ -322,6 +322,9 @@ is removed before reporting: a symbol selected by more than one scope, or
 by both an ancestor and one of its descendants, is listed once. A glob
 that matches a scope covers that scope's whole subtree.
 
+Port, variable, and driver reports omit declarations in inactive generate
+branches of an elaborated design.
+
 The three tabular actions additionally accept @c --name @c \<pattern\>
 to restrict by hierarchical path. Multiple @c --name patterns combine
 with OR semantics; an empty match returns an empty result rather than

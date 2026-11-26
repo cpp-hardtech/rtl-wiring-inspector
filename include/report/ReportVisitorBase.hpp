@@ -7,6 +7,7 @@
 #include "common/FormatBuffer.hpp"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
+#include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/ValueSymbol.h"
 #include "slang/text/Json.h"
 #include "slang/text/SourceLocation.h"
@@ -65,12 +66,22 @@ protected:
     return false;
   }
 
-  /// Return true if @p path passes the name filters and @p symbol has not
-  /// been recorded yet. Overlapping --scope selections can visit the same
-  /// symbol more than once; the first visit wins.
+  /// Accept each matching symbol once and skip inactive generate declarations
+  /// in an elaborated design.
   auto acceptSymbol(ast::Symbol const &symbol, std::string_view path) -> bool {
     if (!nameMatches(path)) {
       return false;
+    }
+    // Lint mode marks all generate contexts uninstantiated.
+    if (!compilation.hasFlag(ast::CompilationFlags::LintMode)) {
+      for (auto const *scope = symbol.getHierarchicalParent(); scope;
+           scope = scope->asSymbol().getHierarchicalParent()) {
+        if (auto const *block =
+                scope->asSymbol().as_if<ast::GenerateBlockSymbol>();
+            block && block->isUninstantiated) {
+          return false;
+        }
+      }
     }
     return reportedSymbols.insert(&symbol).second;
   }
