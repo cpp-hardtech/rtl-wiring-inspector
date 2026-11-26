@@ -20,6 +20,8 @@
 
 #include "fmt/format.h"
 
+#include <algorithm>
+#include <array>
 #include <unordered_set>
 
 using namespace slang;
@@ -28,6 +30,14 @@ using namespace slang::driver;
 using namespace slang::report;
 
 namespace {
+
+constexpr std::array<std::pair<std::string_view, ArgumentDirection>, 4>
+    directionNames{{
+    {"input", ArgumentDirection::In},
+    {"output", ArgumentDirection::Out},
+    {"inout", ArgumentDirection::InOut},
+    {"ref", ArgumentDirection::Ref},
+    }};
 
 auto generateJson(Compilation &compilation, JsonWriter &writer,
                   const std::vector<const ast::Symbol *> &scopeSymbols) {
@@ -106,6 +116,12 @@ auto main(int argc, char **argv) -> int {
   driver.cmdLine.add("--ports", reportPorts,
                      "Report all ports in the design to stdout");
 
+  std::vector<std::string> directions;
+  driver.cmdLine.add("--direction", directions,
+                     "Restrict --ports to the selected direction(s). "
+                     "May be repeated.",
+                     "<input|output|inout|ref>");
+
   std::optional<bool> reportVariables;
   driver.cmdLine.add("--variables", reportVariables,
                      "Report all variables in the design to stdout");
@@ -177,6 +193,24 @@ auto main(int argc, char **argv) -> int {
       SLANG_THROW(std::runtime_error(
           "multiple actions specified; pass exactly one of --ports, "
           "--variables, --drivers, or --ast-json"));
+    }
+
+    if (!directions.empty() && reportPorts != true) {
+      SLANG_THROW(std::runtime_error("--direction requires --ports"));
+    }
+    std::vector<ArgumentDirection> directionFilters;
+    for (const auto &value : directions) {
+      const auto match =
+          std::ranges::find_if(directionNames, [&](const auto &entry) {
+            return entry.first == value;
+          });
+      if (match == directionNames.end()) {
+        SLANG_THROW(std::runtime_error(
+            fmt::format("unknown --direction value '{}'; expected input, "
+                        "output, inout, or ref",
+                        value)));
+      }
+      directionFilters.push_back(match->second);
     }
 
     enum class Format { Table, Json };
@@ -281,6 +315,7 @@ auto main(int argc, char **argv) -> int {
 
     if (reportPorts == true) {
       ReportPorts visitor(*compilation);
+      visitor.setDirectionFilters(std::move(directionFilters));
       emit(visitor);
       return 0;
     }
