@@ -906,6 +906,46 @@ Out        top.u_second.o  1      var       hierarchy.sv:1:41
             ["top.gen_if.u_if.i", "top.gen_if.u_if.o"],
         )
 
+    def test_reports_exclude_inactive_generate_declarations(self):
+        active = "generate_activity.enabled_branch.active_leaf"
+        for action, key, expected in (
+            ("--ports", "name", f"{active}.i"),
+            ("--variables", "name", f"{active}.connected"),
+            ("--drivers", "value", f"{active}.connected"),
+        ):
+            with self.subTest(action=action):
+                result = self.run_report(
+                    "generate_activity.sv", action, "--format", "json"
+                )
+                names = [row[key] for row in json.loads(result.stdout)]
+                self.assertIn(expected, names)
+                self.assertFalse(
+                    any(".disabled_branch." in name for name in names), names
+                )
+
+    def test_inactive_generate_scope_produces_empty_reports(self):
+        for scope in (
+            "generate_activity.disabled_branch",
+            "generate_activity.disabled_*",
+        ):
+            with self.subTest(scope=scope):
+                result = self.run_report(
+                    "generate_activity.sv",
+                    "--variables",
+                    "--scope",
+                    scope,
+                    "--format",
+                    "json",
+                )
+                self.assertEqual(json.loads(result.stdout), [])
+
+    def test_lint_only_reports_generate_declarations(self):
+        result = self.run_report(
+            "generate_activity.sv", "--lint-only", "--variables", "--format", "json"
+        )
+        names = [row["name"] for row in json.loads(result.stdout)]
+        self.assertTrue(any(name.endswith(".enabled_branch.live") for name in names))
+
     def test_scope_instance_array(self):
         result = self.run_report(
             "hierarchy.sv",
