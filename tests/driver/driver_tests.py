@@ -38,6 +38,21 @@ module m(input logic a, output logic [3:0] y,
 endmodule
 """
 
+SPLIT_CONSTANTS_SV = """\
+module ties(output wire [1:0] y);
+  assign y[0] = 1'b0;
+  assign y[1] = 1'b1;
+endmodule
+module mixed(input wire signal, output wire [1:0] y);
+  assign y[0] = 1'b0;
+  assign y[1] = signal;
+endmodule
+module top(input wire signal, output wire lo, hi, mix_lo, mix_hi);
+  ties u_ties(.y({hi,lo}));
+  mixed u_mixed(.signal, .y({mix_hi,mix_lo}));
+endmodule
+"""
+
 CONST_STATE_SV = """\
 module m(input logic clk, input logic [3:0] d,
          output logic [3:0] mux_value, output logic [4:0] packed_value);
@@ -528,6 +543,29 @@ module t(input x, output y);
 
     def test_constant_drivers_nonexistent(self):
         self.assert_fails("rca.sv", "--constant-drivers", "rca.nonexistent")
+
+    def test_constant_drivers_include_all_split_port_slices(self):
+        result = self.run_tool(
+            "--constant-drivers",
+            "top.u_ties.y",
+            "--format",
+            "json",
+            source=SPLIT_CONSTANTS_SV,
+        )
+        self.assertCountEqual(
+            [entry["value"] for entry in json.loads(result.stdout)],
+            ["1'b0", "1'b1"],
+        )
+
+    def test_constant_drivers_reject_partly_constant_split_port(self):
+        result = self.run_tool(
+            "--constant-drivers",
+            "top.u_mixed.y",
+            "--format",
+            "json",
+            source=SPLIT_CONSTANTS_SV,
+        )
+        self.assertEqual(json.loads(result.stdout), [])
 
     def test_constant_drivers_with_register_input(self):
         for name in ("m.mux_value", "m.packed_value"):
