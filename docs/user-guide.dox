@@ -293,7 +293,8 @@ Port and variable widths are the total bit counts of fixed-size types,
 including unpacked arrays and structs. Types without a statically known
 size report a width of @c 0.
 
-Passing more than one action is an error.
+Passing more than one action is an error. A report switch set to @c false
+leaves that action disabled.
 
 @par Output format
 Use @c --format @c table (the default) or @c --format @c json on the
