@@ -5,5 +5,6 @@ var classslang_1_1report_1_1ReportPorts =
     [ "handle", "classslang_1_1report_1_1ReportPorts.html#a9c98e005aa8d43a749600628322fee1d", null ],
     [ "handle", "classslang_1_1report_1_1ReportPorts.html#acb4820bf97a085ec5f197aa9dfad3668", null ],
     [ "ReportVisitorBase", "classslang_1_1report_1_1ReportPorts.html#a0f102fb6516ad8b043b617e1b957429c", null ],
+    [ "setDirectionFilters", "classslang_1_1report_1_1ReportPorts.html#a65f1436f36f2b57eaaffcbd98811a284", null ],
     [ "tableHeader", "classslang_1_1report_1_1ReportPorts.html#af93f576d5cff157e6d178cbaeecec308", null ]
 ];

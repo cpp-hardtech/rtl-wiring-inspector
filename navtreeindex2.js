@@ -73,6 +73,8 @@ var NAVTREEINDEX2 =
 "classslang_1_1report_1_1ReportPorts.html":[6,0,0,1,5],
 "classslang_1_1report_1_1ReportPorts.html#a0f102fb6516ad8b043b617e1b957429c":[5,0,0,4,5,4],
 "classslang_1_1report_1_1ReportPorts.html#a0f102fb6516ad8b043b617e1b957429c":[6,0,0,1,5,4],
+"classslang_1_1report_1_1ReportPorts.html#a65f1436f36f2b57eaaffcbd98811a284":[5,0,0,4,5,5],
+"classslang_1_1report_1_1ReportPorts.html#a65f1436f36f2b57eaaffcbd98811a284":[6,0,0,1,5,5],
 "classslang_1_1report_1_1ReportPorts.html#a9c98e005aa8d43a749600628322fee1d":[5,0,0,4,5,2],
 "classslang_1_1report_1_1ReportPorts.html#a9c98e005aa8d43a749600628322fee1d":[6,0,0,1,5,2],
 "classslang_1_1report_1_1ReportPorts.html#acb4820bf97a085ec5f197aa9dfad3668":[5,0,0,4,5,3],
@@ -81,8 +83,8 @@ var NAVTREEINDEX2 =
 "classslang_1_1report_1_1ReportPorts.html#ae3395d59729d2b07e85156fc35f29a86":[6,0,0,1,5,1],
 "classslang_1_1report_1_1ReportPorts.html#ae675785d4f451fa23231c5bd1a75fa0d":[5,0,0,4,5,0],
 "classslang_1_1report_1_1ReportPorts.html#ae675785d4f451fa23231c5bd1a75fa0d":[6,0,0,1,5,0],
-"classslang_1_1report_1_1ReportPorts.html#af93f576d5cff157e6d178cbaeecec308":[5,0,0,4,5,5],
-"classslang_1_1report_1_1ReportPorts.html#af93f576d5cff157e6d178cbaeecec308":[6,0,0,1,5,5],
+"classslang_1_1report_1_1ReportPorts.html#af93f576d5cff157e6d178cbaeecec308":[5,0,0,4,5,6],
+"classslang_1_1report_1_1ReportPorts.html#af93f576d5cff157e6d178cbaeecec308":[6,0,0,1,5,6],
 "classslang_1_1report_1_1ReportVariables.html":[5,0,0,4,7],
 "classslang_1_1report_1_1ReportVariables.html":[6,0,0,1,7],
 "classslang_1_1report_1_1ReportVariables.html#a1f13a1871a5e906efdcec764f7292db0":[5,0,0,4,7,5],
@@ -247,7 +249,5 @@ var NAVTREEINDEX2 =
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da4fe3b366d208cb5d6d31972b054cef6a":[5,0,0,0,34,27],
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da50c15b40bc46de3e3528e17fe119209e":[5,0,0,0,34,16],
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da74ce78827b02c650a20b149765388247":[5,0,0,0,34,31],
-"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da74e5ad5c14a3bab8eca79afc9b8d4d65":[5,0,0,0,34,25],
-"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da7aeb0277500c86e4aa6bd23f9a737942":[5,0,0,0,34,14],
-"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da8041b508037c30ae59fe353b74918a1b":[5,0,0,0,34,17]
+"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da74e5ad5c14a3bab8eca79afc9b8d4d65":[5,0,0,0,34,25]
 };
