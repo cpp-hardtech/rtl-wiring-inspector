@@ -151,5 +151,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 Distributed under the MIT License. The original copyright notice and the full license text
-are retained in [LICENSE](LICENSE). Provenance and attribution are documented in
-[NOTICE](NOTICE).
+are retained in [LICENSE](LICENSE).
