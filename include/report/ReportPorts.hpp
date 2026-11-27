@@ -6,6 +6,9 @@
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/NetType.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace slang::report {
 
 struct PortInfo {
@@ -18,6 +21,14 @@ struct PortInfo {
 
 /// Visitor for printing port information.
 class ReportPorts : public ReportVisitorBase<ReportPorts, PortInfo> {
+  std::vector<ast::ArgumentDirection> directionFilters;
+
+  auto directionMatches(ast::ArgumentDirection direction) const -> bool {
+    return directionFilters.empty() ||
+           std::ranges::find(directionFilters, direction) !=
+               directionFilters.end();
+  }
+
   /// Return the net type name ("wire", "wand", ...) if the port connects
   /// to a NetSymbol, otherwise "var".
   static auto portNetTypeName(ast::PortSymbol const &symbol) -> std::string {
@@ -45,6 +56,11 @@ class ReportPorts : public ReportVisitorBase<ReportPorts, PortInfo> {
 
 public:
   using ReportVisitorBase::ReportVisitorBase;
+
+  /// Report ports with any of the given directions. An empty list keeps all.
+  void setDirectionFilters(std::vector<ast::ArgumentDirection> filters) {
+    directionFilters = std::move(filters);
+  }
 
   auto tableHeader() const -> netlist::Utilities::Row {
     return {"Direction", "Name", "Width", "Net Type", "Location"};
@@ -74,7 +90,7 @@ public:
 
   void handle(const ast::MultiPortSymbol &symbol) {
     auto path = symbol.getHierarchicalPath();
-    if (!acceptSymbol(symbol, path)) {
+    if (!directionMatches(symbol.direction) || !acceptSymbol(symbol, path)) {
       return;
     }
     items.push_back(PortInfo{
@@ -88,7 +104,7 @@ public:
 
   void handle(const ast::PortSymbol &symbol) {
     auto path = symbol.getHierarchicalPath();
-    if (!acceptSymbol(symbol, path)) {
+    if (!directionMatches(symbol.direction) || !acceptSymbol(symbol, path)) {
       return;
     }
     items.push_back(PortInfo{

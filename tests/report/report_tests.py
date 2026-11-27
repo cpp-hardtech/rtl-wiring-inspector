@@ -254,6 +254,97 @@ rca.genblk1[6].i                         rca.sv:18:15
         self.assertEqual(data[-1]["name"], "rca.o_co")
         self.assertEqual(data[-1]["direction"], "Out")
 
+    def test_port_direction_filter_json(self):
+        for direction, name, label in [
+            ("input", "data_in", "In"),
+            ("output", "data_out", "Out"),
+            ("inout", "bus", "InOut"),
+            ("ref", "state", "Ref"),
+        ]:
+            with self.subTest(direction=direction):
+                result = self.run_report(
+                    "port_directions.sv",
+                    "--ports",
+                    "--direction",
+                    direction,
+                    "--scope",
+                    "top.dut",
+                    "--format",
+                    "json",
+                )
+                self.assertEqual(
+                    [
+                        (port["name"], port["direction"])
+                        for port in json.loads(result.stdout)
+                    ],
+                    [(f"top.dut.{name}", label)],
+                )
+
+    def test_port_direction_filter_combines_with_scope_and_names(self):
+        result = self.run_report(
+            "port_directions.sv",
+            "--ports",
+            "--scope",
+            "top.dut",
+            "--name",
+            "top.dut.data_*",
+            "--name",
+            "top.dut.bus",
+            "--direction",
+            "input",
+            "--direction",
+            "inout",
+            "--direction",
+            "input",
+        )
+        rows = [line.split()[:2] for line in result.stdout.splitlines()]
+        self.assertEqual(
+            rows,
+            [
+                ["Direction", "Name"],
+                ["In", "top.dut.data_in"],
+                ["InOut", "top.dut.bus"],
+            ],
+        )
+
+        empty = self.run_report(
+            "port_directions.sv",
+            "--ports",
+            "--name",
+            "top.dut.bus",
+            "--direction",
+            "output",
+            "--format",
+            "json",
+        )
+        self.assertEqual(json.loads(empty.stdout), [])
+
+    def test_port_direction_filter_rejects_invalid_arguments(self):
+        for action in [
+            ("--variables",),
+            ("--drivers",),
+            ("--ast-json", "-"),
+            ("--ports=false",),
+        ]:
+            with self.subTest(action=action):
+                result = self.run_report(
+                    "rca.sv",
+                    *action,
+                    "--direction",
+                    "input",
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("--direction requires --ports", result.stderr)
+                self.assertEqual(result.stdout, "")
+
+        result = self.run_report(
+            "rca.sv", "--ports", "--direction", "sideways", check=False
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unknown --direction value 'sideways'", result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def test_nonansi_concatenated_ports(self):
         result = self.run_report("nonansi_ports.sv", "--ports", "--format", "json")
         ports = json.loads(result.stdout)
@@ -281,6 +372,11 @@ rca.genblk1[6].i                         rca.sv:18:15
             "legacy_ports.data_*",
         )
         self.assertEqual(json.loads(filtered.stdout), [ports[0], ports[2]])
+
+        outputs = self.run_report(
+            "nonansi_ports.sv", "--ports", "--direction", "output", "--format", "json"
+        )
+        self.assertEqual(json.loads(outputs.stdout), ports[2:])
 
     def test_variables_json(self):
         result = subprocess.run(

@@ -332,6 +332,10 @@ an error (the flag is a filter, not a selector).
 Both @c --scope and @c --name use the glob syntax described in
 @ref glob-syntax (@c *, @c ?, @c **, @c ...).
 
+Use @c --direction with @c --ports to report only @c input, @c output,
+@c inout, or @c ref ports. Repeat it to include multiple directions.
+It combines with @c --scope and @c --name in both table and JSON output.
+
 @par AST JSON shape
 Without @c --scope, @c --ast-json dumps the root symbol. When exactly
 one scope resolves, it dumps a single JSON object for that scope. When
@@ -339,8 +343,8 @@ several scopes resolve, it emits a JSON array with one object per scope,
 so the output is always one valid JSON value.
 
 @code{.ansi}
-# Inspect a single instance's ports.
-rtl-report design.sv --ports --scope top.cpu
+# Inspect a single instance's output ports.
+rtl-report design.sv --ports --scope top.cpu --direction output
 
 # All variables in the design whose name ends in '_q', as JSON.
 rtl-report design.sv --variables --name '**.*_q' --format json

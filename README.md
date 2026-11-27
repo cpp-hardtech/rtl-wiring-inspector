@@ -113,6 +113,7 @@ traded for soundness.
 | Option | Purpose |
 | --- | --- |
 | `--ports` | Report port declarations. |
+| `--direction <input\|output\|inout\|ref>` | Filter `--ports` by direction. Repeat to include multiple directions. |
 | `--variables` | Report typed variables and nets. |
 | `--drivers` | Report driver declarations. |
 | `--ast-json <file>` | Export the elaborated AST as JSON. |
