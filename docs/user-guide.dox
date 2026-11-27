@@ -145,10 +145,9 @@ the logic it feeds do not leak into the answer. Each entry shows the source
 signal, its edge kind, and source location.
 
 @c --constant-drivers @c \<name\>: report the constant values driving a
-named node when its combinational fan-in bottoms out only at literals
-(i.e. the node is tied off). Prints nothing if any register or external
-input reaches the node. Each entry shows the constant value and source
-location.
+named signal when every bit slice is tied off to literals. A register or
+external input reaching any slice leaves the report empty. Each entry
+shows the constant value and source location.
 
 @c --drivers @c \<name[bit-range]\>: report, per bit, which node drives a
 named signal. Each row shows a contiguous bit range, the driving node

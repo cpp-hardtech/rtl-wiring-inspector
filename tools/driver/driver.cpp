@@ -1375,22 +1375,32 @@ auto main(int argc, char **argv) -> int {
       return 0;
     }
 
-    // Report the constant values driving a named node.
+    // Report constant drivers only when the entire named signal is tied off.
     if (constantDriversName.has_value()) {
-      auto *node = graph.lookup(*constantDriversName);
-      if (node == nullptr) {
+      auto nodes = graph.lookupAll(*constantDriversName);
+      if (nodes.empty()) {
         SLANG_THROW(std::runtime_error(
             fmt::format("could not find node: {}", *constantDriversName)));
       }
-      auto constants = graph.getConstantDrivers(*node);
       auto header = Utilities::Row{"Value", "Location"};
       auto table = Utilities::Table{};
-      for (auto const *n : constants) {
-        auto const &constant = n->as<Constant>();
-        auto loc = constant.getLocation();
-        table.push_back(Utilities::Row{constant.value.toString(),
-                                       loc ? loc->toString(graph.fileTable)
-                                           : std::string()});
+      std::unordered_set<NetlistNode const *> reported;
+      for (auto *node : nodes) {
+        auto constants = graph.getConstantDrivers(*node);
+        if (constants.empty()) {
+          table.clear();
+          break;
+        }
+        for (auto const *n : constants) {
+          if (!reported.insert(n).second) {
+            continue;
+          }
+          auto const &constant = n->as<Constant>();
+          auto loc = constant.getLocation();
+          table.push_back(Utilities::Row{constant.value.toString(),
+                                         loc ? loc->toString(graph.fileTable)
+                                             : std::string()});
+        }
       }
       emitTable(header, table);
       printStats();
