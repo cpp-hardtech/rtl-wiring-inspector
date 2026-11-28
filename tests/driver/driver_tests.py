@@ -490,6 +490,27 @@ module t(input x, output y);
         self.assertIn("top.cpu.r", r.stdout)
         self.assertNotIn("top.cpu2.r", r.stdout)
 
+    def test_scope_includes_array_elements(self):
+        cases = {
+            "top.u_arr": {"top.u_arr[0].i", "top.u_arr[1].i"},
+            "top.u_arr[0]": {"top.u_arr[0].i"},
+            "top.gen": {"top.gen[0].u_loop.i", "top.gen[1].u_loop.i"},
+        }
+        for scope, names in cases.items():
+            with self.subTest(scope=scope):
+                r = self.run_tool(
+                    "../report/hierarchy.sv",
+                    "--find",
+                    "top.**.i",
+                    "--scope",
+                    scope,
+                    "--format",
+                    "json",
+                )
+                self.assertEqual(
+                    {entry["name"] for entry in json.loads(r.stdout)}, names
+                )
+
     def test_name_glob_filter(self):
         r = self.run_tool("--report-registers", "--name", "**.cpu2.*", source=FILTER_SV)
         self.assertIn("top.cpu2.r", r.stdout)

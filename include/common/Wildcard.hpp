@@ -154,15 +154,15 @@ inline auto wildcardMatch(const char *text, const char *pattern) -> bool {
   return *text == '\0';
 }
 
-/// Return true if @p path is @p scope itself or a descendant of it, treating
-/// `.` as the hierarchy separator. So `top.cpu` contains `top.cpu` and
-/// `top.cpu.alu.x`, but not `top.cpu2`. Matching is literal; use
-/// wildcardMatch for glob patterns.
+/// Return true if @p path is @p scope itself or a descendant of it.
+/// A dot starts a child scope and an opening bracket starts an array index.
+/// Matching is literal; use wildcardMatch for glob patterns.
 inline auto pathInScope(std::string_view path, std::string_view scope) -> bool {
   if (path.size() < scope.size() || path.substr(0, scope.size()) != scope) {
     return false;
   }
-  return path.size() == scope.size() || path[scope.size()] == '.';
+  const auto suffix = path.substr(scope.size());
+  return suffix.empty() || suffix.front() == '.' || suffix.front() == '[';
 }
 
 } // namespace slang::netlist
