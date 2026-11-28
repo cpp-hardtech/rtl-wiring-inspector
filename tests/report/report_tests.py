@@ -1104,6 +1104,68 @@ rca.genblk1[6].i                         rca.sv:18:15
         self.assertEqual(data["name"], "rca")
         self.assertEqual(data["kind"], "Instance")
 
+    def test_ast_json_overlapping_scopes_emit_one_root(self):
+        for scopes in [
+            ("rca", "rca.sum_q"),
+            ("rca.sum_q", "rca"),
+            ("rca.sum_q", "rca.**"),
+        ]:
+            with self.subTest(scopes=scopes):
+                args = [arg for scope in scopes for arg in ("--scope", scope)]
+                result = self.run_report("rca.sv", "--ast-json", "-", *args)
+                data = json.loads(result.stdout)
+                self.assertIsInstance(data, dict)
+                self.assertEqual((data["kind"], data["name"]), ("Instance", "rca"))
+                members = data["body"]["members"]
+                self.assertEqual(
+                    sum(member.get("name") == "sum_q" for member in members), 1
+                )
+
+    def test_ast_json_overlapping_array_scopes(self):
+        for ancestor, descendant, kind, member_kind in [
+            ("top.u_arr", "top.u_arr[0]", "InstanceArray", "Instance"),
+            ("top.gen", "top.gen[1].u_loop", "GenerateBlockArray", "GenerateBlock"),
+        ]:
+            with self.subTest(ancestor=ancestor):
+                result = self.run_report(
+                    "hierarchy.sv",
+                    "--ast-json",
+                    "-",
+                    "--scope",
+                    descendant,
+                    "--scope",
+                    ancestor,
+                )
+                data = json.loads(result.stdout)
+                self.assertIsInstance(data, dict)
+                self.assertEqual(
+                    (data["kind"], data["name"]), (kind, ancestor.split(".")[-1])
+                )
+                self.assertEqual(
+                    sum(node["kind"] == member_kind for node in data["members"]), 2
+                )
+
+    def test_ast_json_linked_instance_keeps_explicit_member(self):
+        result = self.run_report(
+            "hierarchy.sv",
+            "--ast-json",
+            "-",
+            "--scope",
+            "top.u_second",
+            "--scope",
+            "top.u_second.i",
+            "--scope",
+            "top",
+        )
+        data = json.loads(result.stdout)
+        self.assertEqual(
+            [(node["kind"], node["name"]) for node in data],
+            [("Net", "i"), ("Instance", "top")],
+        )
+        members = data[1]["body"]["members"]
+        instance = next(node for node in members if node.get("name") == "u_second")
+        self.assertIsInstance(instance["body"], str)
+
     # Repeated module instances, generate constructs, instance arrays.
     def test_scope_repeated_instance_ports(self):
         result = self.run_report("hierarchy.sv", "--ports", "--scope", "top.u_second")

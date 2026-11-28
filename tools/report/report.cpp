@@ -12,6 +12,8 @@
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Scope.h"
+#include "slang/ast/symbols/BlockSymbols.h"
+#include "slang/ast/symbols/CheckerSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/text/Json.h"
 #include "slang/util/OS.h"
@@ -54,6 +56,47 @@ constexpr std::array<std::pair<std::string_view, ArgumentDirection>, 4>
     {"inout", ArgumentDirection::InOut},
     {"ref", ArgumentDirection::Ref},
     }};
+
+// Follow AST containment through bodies that the serializer expands.
+auto serializedParent(const Symbol &symbol, const Compilation &compilation)
+    -> const Symbol * {
+  if (auto const *body = symbol.as_if<InstanceBodySymbol>()) {
+    auto const *instance = body->parentInstance;
+    if (body->flags.has(InstanceFlags::Uninstantiated) ||
+        (instance && instance->getCanonicalBody() &&
+         !compilation.hasFlag(CompilationFlags::DisableInstanceCaching))) {
+      return nullptr;
+    }
+    return instance;
+  }
+  if (auto const *body = symbol.as_if<CheckerInstanceBodySymbol>()) {
+    return body->flags.has(InstanceFlags::Uninstantiated)
+               ? nullptr
+               : body->parentInstance;
+  }
+
+  auto const *scope = symbol.getHierarchicalParent();
+  if (!scope) {
+    return nullptr;
+  }
+
+  const auto &parent = scope->asSymbol();
+  switch (parent.kind) {
+  case SymbolKind::GenerateBlock:
+    return parent.as<GenerateBlockSymbol>().isUninstantiated ? nullptr
+                                                             : &parent;
+  case SymbolKind::GenerateBlockArray:
+    return parent.as<GenerateBlockArraySymbol>().valid ? &parent : nullptr;
+  case SymbolKind::TypeAlias:
+  case SymbolKind::ClassType:
+  case SymbolKind::CovergroupType:
+  case SymbolKind::EnumType:
+    // These types expand when they are members of an enclosing scope.
+    return &parent;
+  default:
+    return parent.isType() ? nullptr : &parent;
+  }
+}
 
 auto generateJson(Compilation &compilation, JsonWriter &writer,
                   const std::vector<const ast::Symbol *> &scopeSymbols) {
@@ -321,6 +364,16 @@ auto main(int argc, char **argv) -> int {
     // AST JSON serialisation needs to allocate constants during traversal,
     // so it must run before the compilation is frozen.
     if (astJsonFile) {
+      std::erase_if(scopeSymbols, [&](const Symbol *symbol) {
+        for (auto const *parent = serializedParent(*symbol, *compilation);
+             parent; parent = serializedParent(*parent, *compilation)) {
+          // A type selected directly is serialized as a type name.
+          if (!parent->isType() && seenSymbols.contains(parent)) {
+            return true;
+          }
+        }
+        return false;
+      });
       JsonWriter writer;
       generateJson(*compilation, writer, scopeSymbols);
       writeReport(*astJsonFile, writer.view());
