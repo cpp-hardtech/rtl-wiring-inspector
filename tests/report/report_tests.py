@@ -837,6 +837,25 @@ rca.genblk1[6].i                         rca.sv:18:15
         data = json.loads(result.stdout)
         self.assertEqual(len(data), 6)
 
+    @unittest.skipUnless(os.path.exists("/dev/full"), "requires /dev/full")
+    def test_stdout_write_failure(self):
+        for args in (
+            ("--ports",),
+            ("--ports", "--format", "json", "--output", "-"),
+            ("--ast-json", "-"),
+        ):
+            with self.subTest(args=args), open("/dev/full", "wb") as output:
+                result = subprocess.run(
+                    [self.executable, "rca.sv", *args],
+                    stdout=output,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(
+                    "could not write report to standard output", result.stderr
+                )
+
     def test_disabled_actions_do_not_select_a_report(self):
         for action in ("ports", "variables", "drivers"):
             with self.subTest(action=action):
