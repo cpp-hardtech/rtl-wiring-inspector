@@ -425,6 +425,83 @@ rca.genblk1[6].i                         rca.sv:18:15
             with self.subTest(variable=name):
                 self.assertEqual(widths[f"widths.{name}"], expected)
 
+    def test_port_width_filter(self):
+        result = self.run_report(
+            "widths.sv", "--ports", "--width", "24", "--format", "json"
+        )
+        self.assertEqual(
+            [(port["name"], port["width"]) for port in json.loads(result.stdout)],
+            [("widths.samples", 24)],
+        )
+
+        result = self.run_report(
+            "widths.sv",
+            "--ports",
+            "--width",
+            "8",
+            "--direction",
+            "input",
+            "--format",
+            "json",
+        )
+        self.assertEqual(
+            [port["name"] for port in json.loads(result.stdout)],
+            ["widths.packed_input"],
+        )
+
+        result = self.run_report("nonansi_ports.sv", "--ports", "--width", "4")
+        self.assertIn("legacy_ports.data_out", result.stdout)
+        self.assertNotIn("legacy_ports.mixed_out", result.stdout)
+
+    def test_variable_width_filter(self):
+        result = self.run_report(
+            "widths.sv",
+            "--variables",
+            "--scope",
+            "widths",
+            "--name",
+            "widths.*",
+            "--width",
+            "0",
+            "--width",
+            "40",
+            "--format",
+            "json",
+        )
+        self.assertEqual(
+            {var["name"]: var["width"] for var in json.loads(result.stdout)},
+            {
+                "widths.history": 40,
+                "widths.dynamic_samples": 0,
+                "widths.dynamic_record": 0,
+            },
+        )
+
+        result = self.run_report(
+            "widths.sv", "--variables", "--width", "99", "--format", "json"
+        )
+        self.assertEqual(json.loads(result.stdout), [])
+
+    def test_width_filter_rejects_invalid_arguments(self):
+        for action in [("--drivers",), ("--ast-json", "-"), ("--ports=false",)]:
+            with self.subTest(action=action):
+                result = self.run_report(
+                    "widths.sv", *action, "--width", "8", check=False
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("--width requires --ports or --variables", result.stderr)
+                self.assertEqual(result.stdout, "")
+
+        for value in ("-1", "8.5", "18446744073709551616"):
+            with self.subTest(value=value):
+                result = self.run_report(
+                    "widths.sv", "--ports", f"--width={value}", check=False
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"invalid value '{value}'", result.stderr)
+                self.assertIn("integer argument", result.stderr)
+                self.assertEqual(result.stdout, "")
+
     def test_drivers_json(self):
         result = subprocess.run(
             [self.executable, "rca.sv", "--drivers", "--format", "json"],
