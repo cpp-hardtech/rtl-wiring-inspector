@@ -123,6 +123,14 @@ step than node steps.
 
 A single name can resolve to several split nodes, so the search tries every
 combination of same-named start and end nodes and reports the first path found.
+Add @c --all-endpoint-paths to report one representative path for every
+connected start and end node pair. The text report numbers the paths, and with
+@c --format @c json the result is an array containing one step array per path,
+even for a single match. The option requires both @c --from and @c --to.
+
+@code{.ansi}
+rtl-wiring-inspector design.sv --from top.a --to top.b --all-endpoint-paths --format json
+@endcode
 
 Either endpoint may be given on its own. @c --from @c \<name\> alone reports the
 combinational fan-out cone from the node (equivalent to @c --fan-out), and

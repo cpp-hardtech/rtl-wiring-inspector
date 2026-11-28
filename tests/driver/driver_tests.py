@@ -138,6 +138,15 @@ module top(input logic a, b, output logic c, d);
 endmodule
 """
 
+SPLIT_PATHS_SV = """\
+module m(input wire [1:0] a, input wire b,
+         output wire [1:0] y, output wire z);
+  assign y[0] = a[0];
+  assign y[1] = a[1];
+  assign z = b;
+endmodule
+"""
+
 # One register written in two halves yields two split State nodes with the
 # same name and location.
 SPLIT_REGISTER_SV = """\
@@ -924,6 +933,68 @@ module t(input x, output y);
                 steps = json.load(f)
         self.assertEqual(steps[0]["path"], "rca.i_op0")
         self.assertEqual(steps[-1]["path"], "rca.o_sum")
+
+    def test_all_endpoint_paths_json(self):
+        path = self._write_sv(SPLIT_PATHS_SV)
+        query = ("--from", "m.a", "--to", "m.y", "--format", "json")
+        default = json.loads(self.run_tool(path, *query).stdout)
+        all_paths = json.loads(
+            self.run_tool(path, *query, "--all-endpoint-paths").stdout
+        )
+        self.assertEqual(len(all_paths), 2)
+        self.assertEqual(all_paths[0], default)
+        seen_bits = set()
+        for steps in all_paths:
+            self.assertEqual(steps[0]["path"], "m.a")
+            self.assertEqual(steps[-1]["path"], "m.y")
+            bits = [step["bits"] for step in steps if step.get("symbol_path") == "m.y"]
+            self.assertEqual(len(bits), 1)
+            seen_bits.add(bits[0])
+        self.assertEqual(seen_bits, {"[0]", "[1]"})
+
+        with self.temp_path(".json") as netlist, self.temp_path(".json") as output:
+            self.run_tool(path, "--save-netlist", netlist)
+            self.run_tool(
+                "--load-netlist", netlist, *query, "--all-endpoint-paths", "-o", output
+            )
+            with open(output) as f:
+                self.assertEqual(json.load(f), all_paths)
+
+    def test_all_endpoint_paths_text(self):
+        result = self.run_tool(
+            "--from",
+            "m.a",
+            "--to",
+            "m.y",
+            "--all-endpoint-paths",
+            "--no-colours",
+            source=SPLIT_PATHS_SV,
+        )
+        first, second = result.stdout.split("Path 2 of 2:")
+        self.assertIn("Path 1 of 2:", first)
+        self.assertEqual(first.count("note: output port y"), 1)
+        self.assertEqual(second.count("note: output port y"), 1)
+
+    def test_all_endpoint_paths_single_or_disconnected(self):
+        path = self._write_sv(SPLIT_PATHS_SV)
+        query = ("--from", "m.b", "--to", "m.z", "--format", "json")
+        default = json.loads(self.run_tool(path, *query).stdout)
+        result = self.run_tool(path, *query, "--all-endpoint-paths")
+        self.assertEqual(json.loads(result.stdout), [default])
+
+        disconnected = self.run_tool(
+            path, "--from", "m.b", "--to", "m.y", "--all-endpoint-paths", check=False
+        )
+        self.assertEqual(disconnected.returncode, 1)
+        self.assertEqual(disconnected.stdout, "")
+        self.assertIn("no path between m.b and m.y", disconnected.stderr)
+
+    def test_all_endpoint_paths_requires_two_endpoints(self):
+        result = self.run_tool(
+            "rca.sv", "--from", "rca.i_op0", "--all-endpoint-paths", check=False
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--all-endpoint-paths requires --from and --to", result.stderr)
 
     def test_path_format_json_loaded_netlist_location(self):
         with self.temp_path(".json") as netlist:

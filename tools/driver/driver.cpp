@@ -342,6 +342,11 @@ auto main(int argc, char **argv) -> int {
                      "to the node.",
                      "<name>");
 
+  std::optional<bool> allEndpointPaths;
+  driver.cmdLine.add("--all-endpoint-paths", allEndpointPaths,
+                     "With --from and --to, report one representative path "
+                     "for each connected pair of matching endpoint nodes.");
+
   std::optional<std::string> fanOutName;
   driver.cmdLine.add("--fan-out", fanOutName,
                      "Report the combinational fan-out cone from a named node",
@@ -448,6 +453,13 @@ auto main(int argc, char **argv) -> int {
            VersionInfo::getMinor(), VersionInfo::getPatch(),
            std::string(VersionInfo::getHash()).c_str());
     return 0;
+  }
+
+  const bool showAllPaths = allEndpointPaths.value_or(false);
+  if (showAllPaths && (!fromPointName || !toPointName)) {
+    fmt::print(stderr,
+               "error: --all-endpoint-paths requires --from and --to\n");
+    return 1;
   }
 
   if (debug) {
@@ -607,10 +619,8 @@ auto main(int argc, char **argv) -> int {
 
   // Serialize a path as an alternating node/edge step array. The number of
   // edge steps is one less than the number of node steps.
-  auto pathToJson = [&](NetlistPath const &path,
-                        FileTable const &fileTable) -> std::string {
-    JsonWriter writer;
-    writer.setPrettyPrint(true);
+  auto writePathSteps = [&](JsonWriter &writer, NetlistPath const &path,
+                            FileTable const &fileTable) {
     writer.startArray();
     for (size_t i = 0; i < path.size(); ++i) {
       writeNodeStep(writer, *path[i], fileTable);
@@ -622,7 +632,6 @@ auto main(int argc, char **argv) -> int {
       }
     }
     writer.endArray();
-    return fmt::format("{}\n", writer.view());
   };
 
   // Serialize detected loops. Each entry lists the cycle's nodes and the
@@ -1433,9 +1442,8 @@ auto main(int argc, char **argv) -> int {
       return 0;
     }
 
-    // Find a point-to-point path in the netlist. A single name can resolve
-    // to several split nodes, so search every start/end pair and report the
-    // first path found.
+    // A single name can resolve to several split nodes. Search every
+    // start/end pair, then report the selected set of paths.
     if (fromPointName.has_value() && toPointName.has_value()) {
       DEBUG_PRINT("Searching for path between: {} and {}\n", *fromPointName,
                   *toPointName);
@@ -1447,14 +1455,31 @@ auto main(int argc, char **argv) -> int {
       }
 
       if (outputFormat == Format::Json) {
-        writeOutput(pathToJson(paths.front(), graph.fileTable));
-        printStats();
-        return 0;
+        JsonWriter writer;
+        writer.setPrettyPrint(true);
+        if (showAllPaths) {
+          writer.startArray();
+          for (auto const &path : paths) {
+            writePathSteps(writer, path, graph.fileTable);
+          }
+          writer.endArray();
+        } else {
+          writePathSteps(writer, paths.front(), graph.fileTable);
+        }
+        writeOutput(fmt::format("{}\n", writer.view()));
+      } else if (showAllPaths) {
+        netlist::FormatBuffer buffer;
+        for (size_t i = 0; i < paths.size(); ++i) {
+          buffer.format(
+              "Path {} of {}:\n\n{}\n", i + 1, paths.size(),
+              reportPath(graph.fileTable, diagnostics.get(), paths[i]));
+        }
+        writeOutput(buffer.str());
+      } else {
+        auto result =
+            reportPath(graph.fileTable, diagnostics.get(), paths.front());
+        writeOutput(fmt::format("{}\n", result));
       }
-
-      auto result =
-          reportPath(graph.fileTable, diagnostics.get(), paths.front());
-      writeOutput(fmt::format("{}\n", result));
       printStats();
       return 0;
     }

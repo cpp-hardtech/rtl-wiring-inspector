@@ -83,6 +83,7 @@ traded for soundness.
 | --- | --- | --- |
 | Query | `--from <signal>` | Start of the dependency query (JSON with `--format json`). |
 | Query | `--to <signal>` | End of the dependency query (JSON with `--format json`). |
+| Query | `--all-endpoint-paths` | With `--from` and `--to`, show one path per connected pair of matching endpoint nodes. JSON returns an array of path arrays. |
 | Query | `--fan-in <signal>` | Report the combinational fan-in. |
 | Query | `--fan-out <signal>` | Report the combinational fan-out. |
 | Search | `--find <name>` | Locate signals by name. |
