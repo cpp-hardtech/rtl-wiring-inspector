@@ -426,6 +426,43 @@ module t(input x, output y);
         self.assertIn("rca.sum_q", r.stdout)
         self.assertIsNone(self._parse_stats(r.stdout))
 
+    def test_explicitly_disabled_statistics_are_not_emitted(self):
+        for flags, human, machine in (
+            (("--stats=false", "--stats-json=false"), False, False),
+            (("--stats=false", "--stats-json"), False, True),
+            (("--stats", "--stats-json=false"), True, False),
+        ):
+            with self.subTest(flags=flags):
+                r = self.run_tool("rca.sv", "--find", "rca.i_*", *flags)
+                self.assertIn("rca.i_op0", r.stdout)
+                self.assertEqual("Phase Timing" in r.stderr, human)
+                self.assertEqual(self._parse_stats(r.stderr) is not None, machine)
+
+    def test_explicitly_disabled_reports_do_not_preempt_path(self):
+        r = self.run_tool(
+            "rca.sv",
+            "--report-registers=false",
+            "--comb-loops=false",
+            "--from",
+            "rca.i_op0",
+            "--to",
+            "rca.o_sum",
+            "--format",
+            "json",
+        )
+        steps = json.loads(r.stdout)
+        self.assertTrue(steps, r.stdout)
+        self.assertEqual(steps[0].get("path"), "rca.i_op0")
+        self.assertEqual(steps[-1].get("path"), "rca.o_sum")
+
+    def test_explicitly_disabled_flags_do_not_select_an_action(self):
+        for flag in ("--report-registers", "--comb-loops", "--stats", "--stats-json"):
+            with self.subTest(flag=flag):
+                r = self.run_tool("rca.sv", f"{flag}=false", check=False)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertEqual(r.stdout, "")
+                self.assertIn("no action specified", r.stderr)
+
     def test_stats_json_not_present_without_flag(self):
         """Stats JSON is not emitted when --stats-json is not specified."""
         r = self.run_tool("rca.sv", "--report-registers")

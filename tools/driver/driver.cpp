@@ -973,10 +973,10 @@ auto main(int argc, char **argv) -> int {
   };
 
   auto printStats = [&] {
-    if (stats) {
+    if (stats == true) {
       printStatsHuman();
     }
-    if (statsJson) {
+    if (statsJson == true) {
       printStatsJson();
     }
   };
@@ -1179,7 +1179,7 @@ auto main(int argc, char **argv) -> int {
       emitTable(header, table);
     };
 
-    if (reportRegisters) {
+    if (reportRegisters == true) {
       auto header = Utilities::Row{"Name", "Location"};
       auto table = Utilities::Table{};
       std::unordered_set<std::string> reported;
@@ -1204,7 +1204,7 @@ auto main(int argc, char **argv) -> int {
     }
 
     // Report combinational loops, optionally filtered and machine-readable.
-    if (combLoops) {
+    if (combLoops == true) {
       CombLoops combLoopsAnalysis(graph);
       auto cycles = combLoopsAnalysis.getAllLoops();
 
@@ -1486,7 +1486,7 @@ auto main(int argc, char **argv) -> int {
 
     // A bare --stats/--stats-json is a complete action: build (or load) the
     // graph and report its statistics.
-    if (stats || statsJson) {
+    if (stats == true || statsJson == true) {
       printStats();
       return 0;
     }
