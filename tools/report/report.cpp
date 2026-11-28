@@ -27,6 +27,7 @@
 #include <unordered_set>
 
 using namespace slang;
+using analysis::DriverKind;
 using namespace slang::ast;
 using namespace slang::driver;
 using namespace slang::report;
@@ -151,6 +152,12 @@ auto main(int argc, char **argv) -> int {
   driver.cmdLine.add("--drivers", reportDrivers,
                      "Report all drivers in the design to stdout");
 
+  std::vector<std::string> driverKinds;
+  driver.cmdLine.add("--driver-kind", driverKinds,
+                     "Restrict --drivers to the selected kind(s). "
+                     "May be repeated.",
+                     "<proc|cont>");
+
   std::optional<std::string> astJsonFile;
   driver.cmdLine.add("--ast-json", astJsonFile,
                      "Dump the compiled AST in JSON format to the specified "
@@ -214,6 +221,21 @@ auto main(int argc, char **argv) -> int {
       SLANG_THROW(std::runtime_error(
           "multiple actions specified; pass exactly one of --ports, "
           "--variables, --drivers, or --ast-json"));
+    }
+
+    if (!driverKinds.empty() && reportDrivers != true) {
+      SLANG_THROW(std::runtime_error("--driver-kind requires --drivers"));
+    }
+    std::vector<DriverKind> driverKindFilters;
+    for (const auto &kind : driverKinds) {
+      if (kind == "proc") {
+        driverKindFilters.push_back(DriverKind::Procedural);
+      } else if (kind == "cont") {
+        driverKindFilters.push_back(DriverKind::Continuous);
+      } else {
+        SLANG_THROW(std::runtime_error(fmt::format(
+            "unknown --driver-kind value '{}'; expected proc or cont", kind)));
+      }
     }
 
     if (!directions.empty() && reportPorts != true) {
@@ -351,7 +373,8 @@ auto main(int argc, char **argv) -> int {
                                 std::move(widths));
         emit(visitor);
       } else {
-        ReportDrivers visitor(*compilation, *analysisManager);
+        ReportDrivers visitor(*compilation, *analysisManager,
+                              std::move(driverKindFilters));
         emit(visitor);
       }
       return 0;

@@ -118,6 +118,7 @@ traded for soundness.
 | `--variables` | Report typed variables and nets. |
 | `--width <bits>` | Filter ports and variables by bit width. Repeat to include several widths. |
 | `--drivers` | Report driver declarations. |
+| `--driver-kind <proc\|cont>` | Filter `--drivers` by driver kind. Repeat to include multiple kinds. |
 | `--ast-json <file>` | Export the elaborated AST as JSON. |
 | `--scope <instance>` | Restrict the report to an instance. |
 | `--name <name>` | Restrict the report to a named declaration. |
