@@ -231,19 +231,20 @@ $(function(){initNavTree('Wildcard_8hpp_source.html','',''); });
 <div class="line"><a id="l00155" name="l00155"></a><span class="lineno">  155</span>}</div>
 </div>
 <div class="line"><a id="l00156" name="l00156"></a><span class="lineno">  156</span></div>
-<div class="foldopen" id="foldopen00161" data-start="{" data-end="}">
-<div class="line"><a id="l00161" name="l00161"></a><span class="lineno"><a class="line" href="namespaceslang_1_1netlist.html#ae5ccb936c29cbb5d1eae596208a6c727">  161</a></span><span class="keyword">inline</span> <span class="keyword">auto</span> <a class="code hl_function" href="namespaceslang_1_1netlist.html#ae5ccb936c29cbb5d1eae596208a6c727">pathInScope</a>(std::string_view path, std::string_view scope) -&gt; <span class="keywordtype">bool</span> {</div>
-<div class="line"><a id="l00162" name="l00162"></a><span class="lineno">  162</span>  <span class="keywordflow">if</span> (path.size() &lt; scope.size() || path.substr(0, scope.size()) != scope) {</div>
-<div class="line"><a id="l00163" name="l00163"></a><span class="lineno">  163</span>    <span class="keywordflow">return</span> <span class="keyword">false</span>;</div>
-<div class="line"><a id="l00164" name="l00164"></a><span class="lineno">  164</span>  }</div>
-<div class="line"><a id="l00165" name="l00165"></a><span class="lineno">  165</span>  <span class="keywordflow">return</span> path.size() == scope.size() || path[scope.size()] == <span class="charliteral">&#39;.&#39;</span>;</div>
+<div class="foldopen" id="foldopen00160" data-start="{" data-end="}">
+<div class="line"><a id="l00160" name="l00160"></a><span class="lineno"><a class="line" href="namespaceslang_1_1netlist.html#ae5ccb936c29cbb5d1eae596208a6c727">  160</a></span><span class="keyword">inline</span> <span class="keyword">auto</span> <a class="code hl_function" href="namespaceslang_1_1netlist.html#ae5ccb936c29cbb5d1eae596208a6c727">pathInScope</a>(std::string_view path, std::string_view scope) -&gt; <span class="keywordtype">bool</span> {</div>
+<div class="line"><a id="l00161" name="l00161"></a><span class="lineno">  161</span>  <span class="keywordflow">if</span> (path.size() &lt; scope.size() || path.substr(0, scope.size()) != scope) {</div>
+<div class="line"><a id="l00162" name="l00162"></a><span class="lineno">  162</span>    <span class="keywordflow">return</span> <span class="keyword">false</span>;</div>
+<div class="line"><a id="l00163" name="l00163"></a><span class="lineno">  163</span>  }</div>
+<div class="line"><a id="l00164" name="l00164"></a><span class="lineno">  164</span>  <span class="keyword">const</span> <span class="keyword">auto</span> suffix = path.substr(scope.size());</div>
+<div class="line"><a id="l00165" name="l00165"></a><span class="lineno">  165</span>  <span class="keywordflow">return</span> suffix.empty() || suffix.front() == <span class="charliteral">&#39;.&#39;</span> || suffix.front() == <span class="charliteral">&#39;[&#39;</span>;</div>
 <div class="line"><a id="l00166" name="l00166"></a><span class="lineno">  166</span>}</div>
 </div>
 <div class="line"><a id="l00167" name="l00167"></a><span class="lineno">  167</span> </div>
 <div class="line"><a id="l00168" name="l00168"></a><span class="lineno">  168</span>} <span class="comment">// namespace slang::netlist</span></div>
 <div class="ttc" id="anamespaceslang_1_1netlist_html"><div class="ttname"><a href="namespaceslang_1_1netlist.html">slang::netlist</a></div><div class="ttdef"><b>Definition</b> FormatBuffer.hpp:9</div></div>
 <div class="ttc" id="anamespaceslang_1_1netlist_html_a162cc7d051626bde8c356d0d217fef8f"><div class="ttname"><a href="namespaceslang_1_1netlist.html#a162cc7d051626bde8c356d0d217fef8f">slang::netlist::wildcardMatch</a></div><div class="ttdeci">auto wildcardMatch(const char *text, const char *pattern) -&gt; bool</div><div class="ttdef"><b>Definition</b> Wildcard.hpp:28</div></div>
-<div class="ttc" id="anamespaceslang_1_1netlist_html_ae5ccb936c29cbb5d1eae596208a6c727"><div class="ttname"><a href="namespaceslang_1_1netlist.html#ae5ccb936c29cbb5d1eae596208a6c727">slang::netlist::pathInScope</a></div><div class="ttdeci">auto pathInScope(std::string_view path, std::string_view scope) -&gt; bool</div><div class="ttdef"><b>Definition</b> Wildcard.hpp:161</div></div>
+<div class="ttc" id="anamespaceslang_1_1netlist_html_ae5ccb936c29cbb5d1eae596208a6c727"><div class="ttname"><a href="namespaceslang_1_1netlist.html#ae5ccb936c29cbb5d1eae596208a6c727">slang::netlist::pathInScope</a></div><div class="ttdeci">auto pathInScope(std::string_view path, std::string_view scope) -&gt; bool</div><div class="ttdef"><b>Definition</b> Wildcard.hpp:160</div></div>
 </div><!-- fragment --></div><!-- contents -->
 </div><!-- doc-content -->
 </div><!-- container -->

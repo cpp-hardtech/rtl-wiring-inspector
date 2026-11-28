@@ -1,5 +1,6 @@
 var NAVTREEINDEX4 =
 {
+"user-guide.html#perf-stats":[3,3,1],
 "user-guide.html#perf-threads":[3,3,0],
 "user-guide.html#performance":[3,3],
 "user-guide.html#python-bindings":[3,2],

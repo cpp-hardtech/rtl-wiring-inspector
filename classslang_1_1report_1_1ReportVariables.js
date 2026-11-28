@@ -1,6 +1,6 @@
 var classslang_1_1report_1_1ReportVariables =
 [
-    [ "ReportVariables", "classslang_1_1report_1_1ReportVariables.html#af97f40cc9c76b4d2a77c2632800b23d4", null ],
+    [ "ReportVariables", "classslang_1_1report_1_1ReportVariables.html#a42cd36d2d187f49b2118d0767e46bf43", null ],
     [ "appendItemRows", "classslang_1_1report_1_1ReportVariables.html#a9bf1bc6bb97ed56f0f912d0286e6bd95", null ],
     [ "emitJsonItem", "classslang_1_1report_1_1ReportVariables.html#aa9bce8cad27e538aa875d2aafc5508f7", null ],
     [ "handle", "classslang_1_1report_1_1ReportVariables.html#ad7acc804a14d9199792d888f9ebed646", null ],

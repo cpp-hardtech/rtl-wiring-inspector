@@ -487,7 +487,7 @@ template&lt;typename... T&gt; </div>
   </tr>
 </table>
 </div><div class="memdoc">
-<p>Return true if <code class="param">path</code> is <code class="param">scope</code> itself or a descendant of it, treating <span class="tt">.</span> as the hierarchy separator. So <span class="tt">top.cpu</span> contains <span class="tt">top.cpu</span> and <span class="tt">top.cpu.alu.x</span>, but not <span class="tt">top.cpu2</span>. Matching is literal; use wildcardMatch for glob patterns. </p>
+<p>Return true if <code class="param">path</code> is <code class="param">scope</code> itself or a descendant of it. A dot starts a child scope and an opening bracket starts an array index. Matching is literal; use wildcardMatch for glob patterns. </p>
 
 </div>
 </div>

@@ -1,5 +1,6 @@
 var NAVTREEINDEX3 =
 {
+"namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da74e5ad5c14a3bab8eca79afc9b8d4d65":[5,0,0,0,34,25],
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da7aeb0277500c86e4aa6bd23f9a737942":[5,0,0,0,34,14],
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da8041b508037c30ae59fe353b74918a1b":[5,0,0,0,34,17],
 "namespaceslang_1_1netlist.html#a82b2f8e2e6e404d274ad42bbf1201a6da80594b6ca1740ffc423e83fb9e43dcd5":[5,0,0,0,34,7],
@@ -248,6 +249,5 @@ var NAVTREEINDEX3 =
 "user-guide.html#cli-usage":[3,1],
 "user-guide.html#getting-started":[3,0],
 "user-guide.html#glob-syntax":[3,4,3],
-"user-guide.html#perf-considerations":[3,3,2],
-"user-guide.html#perf-stats":[3,3,1]
+"user-guide.html#perf-considerations":[3,3,2]
 };

@@ -111,7 +111,7 @@ Inheritance diagram for slang::report::ReportDrivers:</div>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 id="header-pub-methods" class="groupheader"><a id="pub-methods" name="pub-methods"></a>
 Public Member Functions</h2></td></tr>
-<tr class="memitem:aa65debda464880e75ae37f9679c35b7b" id="r_aa65debda464880e75ae37f9679c35b7b"><td class="memItemLeft">&#160;</td><td class="memItemRight"><a class="el" href="#aa65debda464880e75ae37f9679c35b7b">ReportDrivers</a> (ast::Compilation &amp;<a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html#a05dba36af44c116cf9c73b8b441b5245">compilation</a>, analysis::AnalysisManager &amp;analysisManager)</td></tr>
+<tr class="memitem:af0194e381e1685077d9d6053fc32cdf1" id="r_af0194e381e1685077d9d6053fc32cdf1"><td class="memItemLeft">&#160;</td><td class="memItemRight"><a class="el" href="#af0194e381e1685077d9d6053fc32cdf1">ReportDrivers</a> (ast::Compilation &amp;<a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html#a05dba36af44c116cf9c73b8b441b5245">compilation</a>, analysis::AnalysisManager &amp;analysisManager, std::vector&lt; analysis::DriverKind &gt; kinds={})</td></tr>
 <tr class="memitem:a4b104dbbbbc17f0711ac0537b3cf5335" id="r_a4b104dbbbbc17f0711ac0537b3cf5335"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="#a4b104dbbbbc17f0711ac0537b3cf5335">tableHeader</a> () const -&gt; <a class="el" href="structslang_1_1netlist_1_1Utilities.html#a4b0bf762ffe3b344565f5da7e9114e00">netlist::Utilities::Row</a></td></tr>
 <tr class="memitem:a5e833a80eed54551ba41f8c1dd0058b7" id="r_a5e833a80eed54551ba41f8c1dd0058b7"><td class="memItemLeft">void&#160;</td><td class="memItemRight"><a class="el" href="#a5e833a80eed54551ba41f8c1dd0058b7">appendItemRows</a> (<a class="el" href="structslang_1_1netlist_1_1Utilities.html#a014f19e27e6c322676cd55a6cda7877e">netlist::Utilities::Table</a> &amp;table, <a class="el" href="structslang_1_1report_1_1ValueInfo.html">ValueInfo</a> const &amp;value) const</td></tr>
 <tr class="memitem:aabe1dd27339f40ecfec09a35776a240f" id="r_aabe1dd27339f40ecfec09a35776a240f"><td class="memItemLeft">void&#160;</td><td class="memItemRight"><a class="el" href="#aabe1dd27339f40ecfec09a35776a240f">emitJsonItem</a> (JsonWriter &amp;writer, <a class="el" href="structslang_1_1report_1_1ValueInfo.html">ValueInfo</a> const &amp;value) const</td></tr>
@@ -132,6 +132,7 @@ Additional Inherited Members</h2></td></tr>
 <tr class="memitem:ab0ebcb87eceb2c43a0c469ab121ac256 inherit pro_methods_classslang_1_1report_1_1ReportVisitorBase" id="r_ab0ebcb87eceb2c43a0c469ab121ac256"><td class="memItemLeft">auto&#160;</td><td class="memItemRight"><a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html#ab0ebcb87eceb2c43a0c469ab121ac256">canonicalValueSymbol</a> (ast::ValueSymbol const &amp;symbol) -&gt; ast::ValueSymbol const &amp;</td></tr>
 <tr class="inherit_header pro_static_methods_classslang_1_1report_1_1ReportVisitorBase"><td colspan="2" onclick="javascript:dynsection.toggleInherit('pro_static_methods_classslang_1_1report_1_1ReportVisitorBase')"><span class="dynarrow"><span class="arrowhead closed"></span></span>Static Protected Member Functions inherited from <a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html">slang::report::ReportVisitorBase&lt; ReportDrivers, ValueInfo &gt;</a></td></tr>
 <tr class="memitem:a6968a0f7e5d90004073442f7492a5af4 inherit pro_static_methods_classslang_1_1report_1_1ReportVisitorBase" id="r_a6968a0f7e5d90004073442f7492a5af4"><td class="memItemLeft">static auto&#160;</td><td class="memItemRight"><a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html#a6968a0f7e5d90004073442f7492a5af4">reportWidth</a> (ast::Type const &amp;type) -&gt; uint64_t</td></tr>
+<tr class="memitem:a93d900150f07ebf97ebfdfaf192cc44b inherit pro_static_methods_classslang_1_1report_1_1ReportVisitorBase" id="r_a93d900150f07ebf97ebfdfaf192cc44b"><td class="memItemLeft">static auto&#160;</td><td class="memItemRight"><a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html#a93d900150f07ebf97ebfdfaf192cc44b">widthMatches</a> (uint64_t width, const std::vector&lt; uint64_t &gt; &amp;filters) -&gt; bool</td></tr>
 <tr class="inherit_header pro_attribs_classslang_1_1report_1_1ReportVisitorBase"><td colspan="2" onclick="javascript:dynsection.toggleInherit('pro_attribs_classslang_1_1report_1_1ReportVisitorBase')"><span class="dynarrow"><span class="arrowhead closed"></span></span>Protected Attributes inherited from <a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html">slang::report::ReportVisitorBase&lt; ReportDrivers, ValueInfo &gt;</a></td></tr>
 <tr class="memitem:a05dba36af44c116cf9c73b8b441b5245 inherit pro_attribs_classslang_1_1report_1_1ReportVisitorBase" id="r_a05dba36af44c116cf9c73b8b441b5245"><td class="memItemLeft">ast::Compilation &amp;&#160;</td><td class="memItemRight"><a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html#a05dba36af44c116cf9c73b8b441b5245">compilation</a></td></tr>
 <tr class="memitem:acd244fb18e0fa12cb235c265e50b8c5b inherit pro_attribs_classslang_1_1report_1_1ReportVisitorBase" id="r_acd244fb18e0fa12cb235c265e50b8c5b"><td class="memItemLeft">std::vector&lt; <a class="el" href="structslang_1_1report_1_1ValueInfo.html">ValueInfo</a> &gt;&#160;</td><td class="memItemRight"><a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html#acd244fb18e0fa12cb235c265e50b8c5b">items</a></td></tr>
@@ -142,8 +143,8 @@ Additional Inherited Members</h2></td></tr>
 <a name="details" id="details"></a><h2 id="header-details" class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>Visitor for printing driver information. </p>
 </div><a name="doc-constructors" id="doc-constructors"></a><h2 id="header-doc-constructors" class="groupheader">Constructor &amp; Destructor Documentation</h2>
-<a id="aa65debda464880e75ae37f9679c35b7b" name="aa65debda464880e75ae37f9679c35b7b"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#aa65debda464880e75ae37f9679c35b7b">&#9670;&#160;</a></span>ReportDrivers()</h2>
+<a id="af0194e381e1685077d9d6053fc32cdf1" name="af0194e381e1685077d9d6053fc32cdf1"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#af0194e381e1685077d9d6053fc32cdf1">&#9670;&#160;</a></span>ReportDrivers()</h2>
 
 <div class="memitem">
 <div class="memproto">
@@ -159,7 +160,12 @@ Additional Inherited Members</h2></td></tr>
         <tr>
           <td class="paramkey"></td>
           <td></td>
-          <td class="paramtype">analysis::AnalysisManager &amp;</td>          <td class="paramname"><span class="paramname"><em>analysisManager</em></span>&#160;)</td>
+          <td class="paramtype">analysis::AnalysisManager &amp;</td>          <td class="paramname"><span class="paramname"><em>analysisManager</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">std::vector&lt; analysis::DriverKind &gt;</td>          <td class="paramname"><span class="paramname"><em>kinds</em></span><span class="paramdefsep"> = </span><span class="paramdefval">{}</span>&#160;)</td>
         </tr>
       </table>
   </td>
@@ -252,7 +258,7 @@ Additional Inherited Members</h2></td></tr>
   </tr>
 </table>
 </div><div class="memdoc">
-<p>Slang's AnalysisManager::getDrivers API returns all known drivers for static lvalue symbols (via the ValueSymbol type). Create a <a class="el" href="structslang_1_1report_1_1ValueInfo.html">ValueInfo</a> entry for each symbol and populate it with the driver information. </p>
+<p>Slang's AnalysisManager::getDrivers API returns all known drivers for static lvalue symbols (via the ValueSymbol type). Create a <a class="el" href="structslang_1_1report_1_1ValueInfo.html">ValueInfo</a> entry for each symbol with the matching driver information. </p>
 
 </div>
 </div>

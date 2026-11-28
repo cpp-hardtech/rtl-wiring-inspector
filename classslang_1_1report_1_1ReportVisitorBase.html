@@ -123,6 +123,7 @@ Protected Member Functions</h2></td></tr>
 <tr class="heading"><td colspan="2"><h2 id="header-pro-static-methods" class="groupheader"><a id="pro-static-methods" name="pro-static-methods"></a>
 Static Protected Member Functions</h2></td></tr>
 <tr class="memitem:a6968a0f7e5d90004073442f7492a5af4" id="r_a6968a0f7e5d90004073442f7492a5af4"><td class="memItemLeft">static auto&#160;</td><td class="memItemRight"><a class="el" href="#a6968a0f7e5d90004073442f7492a5af4">reportWidth</a> (ast::Type const &amp;type) -&gt; uint64_t</td></tr>
+<tr class="memitem:a93d900150f07ebf97ebfdfaf192cc44b" id="r_a93d900150f07ebf97ebfdfaf192cc44b"><td class="memItemLeft">static auto&#160;</td><td class="memItemRight"><a class="el" href="#a93d900150f07ebf97ebfdfaf192cc44b">widthMatches</a> (uint64_t width, const std::vector&lt; uint64_t &gt; &amp;filters) -&gt; bool</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 id="header-pro-attribs" class="groupheader"><a id="pro-attribs" name="pro-attribs"></a>
 Protected Attributes</h2></td></tr>
@@ -396,6 +397,37 @@ template&lt;typename Derived, typename Info&gt; </div>
 </table>
 </div><div class="memdoc">
 <p>Restrict reporting to symbols whose hierarchical path matches at least one of <code class="param">filters</code> (glob syntax per <a class="el" href="namespaceslang_1_1netlist.html#a162cc7d051626bde8c356d0d217fef8f">netlist::wildcardMatch</a>: <span class="tt">*</span>/<span class="tt">?</span> stay within a single path segment, <span class="tt">**</span>/<span class="tt">...</span> cross boundaries). An empty list disables filtering. </p>
+
+</div>
+</div>
+<a id="a93d900150f07ebf97ebfdfaf192cc44b" name="a93d900150f07ebf97ebfdfaf192cc44b"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a93d900150f07ebf97ebfdfaf192cc44b">&#9670;&#160;</a></span>widthMatches()</h2>
+
+<div class="memitem">
+<div class="memproto">
+<div class="memtemplate">
+template&lt;typename Derived, typename Info&gt; </div>
+<table class="mlabels">
+  <tr>
+  <td class="mlabels-left">
+      <table class="memname">
+        <tr>
+          <td class="memname">auto <a class="el" href="classslang_1_1report_1_1ReportVisitorBase.html">slang::report::ReportVisitorBase</a>&lt; Derived, Info &gt;::widthMatches </td>
+          <td>(</td>
+          <td class="paramtype">uint64_t</td>          <td class="paramname"><span class="paramname"><em>width</em></span>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const std::vector&lt; uint64_t &gt; &amp;</td>          <td class="paramname"><span class="paramname"><em>filters</em></span>&#160;) -&gt; bool</td>
+        </tr>
+      </table>
+  </td>
+  <td class="mlabels-right">
+<span class="mlabels"><span class="mlabel inline">inline</span><span class="mlabel static">static</span><span class="mlabel protected">protected</span></span>  </td>
+  </tr>
+</table>
+</div><div class="memdoc">
 
 </div>
 </div>
