@@ -22,6 +22,8 @@
 
 #include <algorithm>
 #include <array>
+#include <iostream>
+#include <stdexcept>
 #include <unordered_set>
 
 using namespace slang;
@@ -30,6 +32,19 @@ using namespace slang::driver;
 using namespace slang::report;
 
 namespace {
+
+void writeReport(std::string const &path, std::string_view content) {
+  if (path != "-") {
+    OS::writeFile(path, content);
+    return;
+  }
+
+  std::cout.write(content.data(), static_cast<std::streamsize>(content.size()));
+  if (!std::cout.flush()) {
+    SLANG_THROW(
+        std::runtime_error("could not write report to standard output"));
+  }
+}
 
 constexpr std::array<std::pair<std::string_view, ArgumentDirection>, 4>
     directionNames{{
@@ -275,7 +290,7 @@ auto main(int argc, char **argv) -> int {
     if (astJsonFile) {
       JsonWriter writer;
       generateJson(*compilation, writer, scopeSymbols);
-      OS::writeFile(*astJsonFile, writer.view());
+      writeReport(*astJsonFile, writer.view());
       return 0;
     }
 
@@ -284,13 +299,7 @@ auto main(int argc, char **argv) -> int {
 
     compilation->freeze();
 
-    auto writeOutput = [&](std::string_view content) {
-      if (outputFile && *outputFile != "-") {
-        OS::writeFile(*outputFile, content);
-      } else {
-        OS::print(content);
-      }
-    };
+    const auto reportPath = outputFile.value_or("-");
 
     auto emit = [&](auto &visitor) {
       visitor.setNameFilters(nameFilters);
@@ -305,11 +314,11 @@ auto main(int argc, char **argv) -> int {
         JsonWriter writer;
         writer.setPrettyPrint(true);
         visitor.report(writer);
-        writeOutput(fmt::format("{}\n", writer.view()));
+        writeReport(reportPath, fmt::format("{}\n", writer.view()));
       } else {
         netlist::FormatBuffer buf;
         visitor.report(buf);
-        writeOutput(buf.str());
+        writeReport(reportPath, buf.str());
       }
     };
 
