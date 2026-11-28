@@ -449,6 +449,72 @@ rca.genblk1[6].i                         rca.sv:18:15
 
         self.assertEqual(by_value["rca.p_width"]["drivers"], [])
 
+    def test_driver_kind_filters_bit_ranges(self):
+        for kinds, expected in [
+            (("proc",), {("[1]", "proc")}),
+            (("cont",), {("[0]", "cont")}),
+            (("cont", "proc", "cont"), {("[0]", "cont"), ("[1]", "proc")}),
+        ]:
+            with self.subTest(kinds=kinds):
+                selection = [arg for kind in kinds for arg in ("--driver-kind", kind)]
+                result = self.run_report(
+                    "driver_kinds.sv",
+                    "--drivers",
+                    "--scope",
+                    "driver_kinds",
+                    "--name",
+                    "driver_kinds.mixed",
+                    *selection,
+                    "--format",
+                    "json",
+                )
+                entries = json.loads(result.stdout)
+                self.assertEqual(
+                    [entry["value"] for entry in entries], ["driver_kinds.mixed"]
+                )
+                drivers = entries[0]["drivers"]
+                self.assertEqual(len(drivers), len(expected))
+                self.assertEqual(
+                    {(driver["range"], driver["kind"]) for driver in drivers}, expected
+                )
+
+    def test_driver_kind_omits_values_without_matching_drivers(self):
+        result = self.run_report(
+            "driver_kinds.sv", "--drivers", "--driver-kind", "proc"
+        )
+        self.assertIn("driver_kinds.mixed", result.stdout)
+        self.assertIn("mixed[1]", result.stdout)
+        self.assertNotIn("mixed[0]", result.stdout)
+        self.assertNotIn("driver_kinds.continuous_only", result.stdout)
+
+        result = self.run_report(
+            "rca.sv",
+            "--drivers",
+            "--name",
+            "rca.p_width",
+            "--name",
+            "rca.sum_q",
+            "--driver-kind",
+            "cont",
+            "--format",
+            "json",
+        )
+        self.assertEqual(json.loads(result.stdout), [])
+
+    def test_driver_kind_rejects_invalid_arguments(self):
+        for action, kind, error in [
+            ("--drivers", "clock", "unknown --driver-kind"),
+            ("--drivers=false", "proc", "--driver-kind requires --drivers"),
+            ("--ports", "cont", "--driver-kind requires --drivers"),
+        ]:
+            with self.subTest(action=action, kind=kind):
+                result = self.run_report(
+                    "rca.sv", action, "--driver-kind", kind, check=False
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+                self.assertEqual(result.stdout, "")
+
     def test_unknown_format(self):
         result = subprocess.run(
             [self.executable, "rca.sv", "--ports", "--format", "bogus"],

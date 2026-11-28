@@ -309,6 +309,11 @@ By default the tabular actions print to stdout; pass @c -o /
 @c --ast-json takes its file path directly on the flag.
 
 @par Filtering
+Use @c --driver-kind @c proc or @c --driver-kind @c cont with @c --drivers
+to select procedural or continuous drivers. Repeat it to include multiple
+kinds. A value is reported only when at least one of its drivers matches.
+This filter combines with @c --scope and @c --name in table and JSON output.
+
 All four actions accept @c --scope @c \<path\> to restrict reporting to
 one or more named hierarchical scopes. @c \<path\> may be a literal
 hierarchical name (resolved via slang's name lookup) or a glob pattern

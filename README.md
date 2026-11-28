@@ -116,6 +116,7 @@ traded for soundness.
 | `--direction <input\|output\|inout\|ref>` | Filter `--ports` by direction. Repeat to include multiple directions. |
 | `--variables` | Report typed variables and nets. |
 | `--drivers` | Report driver declarations. |
+| `--driver-kind <proc\|cont>` | Filter `--drivers` by driver kind. Repeat to include multiple kinds. |
 | `--ast-json <file>` | Export the elaborated AST as JSON. |
 | `--scope <instance>` | Restrict the report to an instance. |
 | `--name <name>` | Restrict the report to a named declaration. |

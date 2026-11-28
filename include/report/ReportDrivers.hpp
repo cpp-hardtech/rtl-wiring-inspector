@@ -9,6 +9,8 @@
 #include "slang/ast/ValuePath.h"
 #include "slang/ast/symbols/ValueSymbol.h"
 
+#include <algorithm>
+
 namespace slang::report {
 
 struct DriverInfo {
@@ -27,6 +29,7 @@ struct ValueInfo {
 /// Visitor for printing driver information.
 class ReportDrivers : public ReportVisitorBase<ReportDrivers, ValueInfo> {
   analysis::AnalysisManager &analysisManager;
+  std::vector<analysis::DriverKind> kindFilters;
 
   /// Return a string representation of the LSP for a driver of a symbol.
   static auto driverPathToString(const ast::ValueSymbol &symbol,
@@ -41,8 +44,10 @@ class ReportDrivers : public ReportVisitorBase<ReportDrivers, ValueInfo> {
 
 public:
   explicit ReportDrivers(ast::Compilation &compilation,
-                         analysis::AnalysisManager &analysisManager)
-      : ReportVisitorBase(compilation), analysisManager(analysisManager) {}
+                         analysis::AnalysisManager &analysisManager,
+                         std::vector<analysis::DriverKind> kinds = {})
+      : ReportVisitorBase(compilation), analysisManager(analysisManager),
+        kindFilters(std::move(kinds)) {}
 
   auto tableHeader() const -> netlist::Utilities::Row {
     return {"Value", "Range", "Driver", "Type", "Location"};
@@ -86,7 +91,7 @@ public:
 
   /// Slang's AnalysisManager::getDrivers API returns all known drivers for
   /// static lvalue symbols (via the ValueSymbol type). Create a ValueInfo
-  /// entry for each symbol and populate it with the driver information.
+  /// entry for each symbol with the matching driver information.
   void handle(ast::ValueSymbol const &symbol) {
     auto path = symbol.getHierarchicalPath();
     if (!acceptSymbol(symbol, path)) {
@@ -98,13 +103,19 @@ public:
     auto const &driverSymbol = canonicalValueSymbol(symbol);
     auto drivers = analysisManager.getDrivers(driverSymbol);
     for (auto const *driver : drivers) {
+      if (!kindFilters.empty() &&
+          std::ranges::find(kindFilters, driver->kind) == kindFilters.end()) {
+        continue;
+      }
       value.drivers.emplace_back(driverPathToString(driverSymbol, *driver),
                                  driver->kind,
                                  netlist::DriverBitRange(driver->getBounds()),
                                  driver->getSourceRange().start());
     }
 
-    items.emplace_back(std::move(value));
+    if (kindFilters.empty() || !value.drivers.empty()) {
+      items.emplace_back(std::move(value));
+    }
   }
 };
 
