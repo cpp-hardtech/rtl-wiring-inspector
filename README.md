@@ -115,6 +115,7 @@ traded for soundness.
 | `--ports` | Report port declarations. |
 | `--direction <input\|output\|inout\|ref>` | Filter `--ports` by direction. Repeat to include multiple directions. |
 | `--variables` | Report typed variables and nets. |
+| `--width <bits>` | Filter ports and variables by bit width. Repeat to include several widths. |
 | `--drivers` | Report driver declarations. |
 | `--ast-json <file>` | Export the elaborated AST as JSON. |
 | `--scope <instance>` | Restrict the report to an instance. |

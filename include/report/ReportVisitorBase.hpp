@@ -12,6 +12,7 @@
 #include "slang/text/Json.h"
 #include "slang/text/SourceLocation.h"
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -49,6 +50,12 @@ protected:
 
   static auto reportWidth(ast::Type const &type) -> uint64_t {
     return type.isFixedSize() ? type.getBitstreamWidth() : 0;
+  }
+
+  static auto widthMatches(uint64_t width, const std::vector<uint64_t> &filters)
+      -> bool {
+    return filters.empty() ||
+           std::ranges::find(filters, width) != filters.end();
   }
 
   /// Return true if no name filters are set, or if @p name matches at

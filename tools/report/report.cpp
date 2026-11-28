@@ -126,6 +126,12 @@ auto main(int argc, char **argv) -> int {
   driver.cmdLine.add("--variables", reportVariables,
                      "Report all variables in the design to stdout");
 
+  std::vector<uint64_t> widths;
+  driver.cmdLine.add("--width", widths,
+                     "Restrict --ports and --variables to a reported bit "
+                     "width. Use 0 for unknown static width. May be repeated.",
+                     "<bits>");
+
   std::optional<bool> reportDrivers;
   driver.cmdLine.add("--drivers", reportDrivers,
                      "Report all drivers in the design to stdout");
@@ -211,6 +217,11 @@ auto main(int argc, char **argv) -> int {
                         value)));
       }
       directionFilters.push_back(match->second);
+    }
+
+    if (!widths.empty() && reportPorts != true && reportVariables != true) {
+      SLANG_THROW(
+          std::runtime_error("--width requires --ports or --variables"));
     }
 
     enum class Format { Table, Json };
@@ -314,7 +325,7 @@ auto main(int argc, char **argv) -> int {
     };
 
     if (reportPorts == true) {
-      ReportPorts visitor(*compilation);
+      ReportPorts visitor(*compilation, std::move(widths));
       visitor.setDirectionFilters(std::move(directionFilters));
       emit(visitor);
       return 0;
@@ -327,7 +338,8 @@ auto main(int argc, char **argv) -> int {
         return 1;
       }
       if (reportVariables == true) {
-        ReportVariables visitor(*compilation, *analysisManager);
+        ReportVariables visitor(*compilation, *analysisManager,
+                                std::move(widths));
         emit(visitor);
       } else {
         ReportDrivers visitor(*compilation, *analysisManager);

@@ -21,16 +21,22 @@ struct VariableInfo {
 class ReportVariables
     : public ReportVisitorBase<ReportVariables, VariableInfo> {
   analysis::AnalysisManager &analysisManager;
+  std::vector<uint64_t> widthFilters;
 
   auto record(ast::ValueSymbol const &symbol, std::string kind) -> void {
     auto path = symbol.getHierarchicalPath();
     if (!acceptSymbol(symbol, path)) {
       return;
     }
+    const auto &type = symbol.getType();
+    const auto width = reportWidth(type);
+    if (!widthMatches(width, widthFilters)) {
+      return;
+    }
     items.push_back(VariableInfo{
         .name = std::move(path),
-        .type = symbol.getType().toString(),
-        .width = reportWidth(symbol.getType()),
+        .type = type.toString(),
+        .width = width,
         .kind = std::move(kind),
         .drivers =
             analysisManager.getDrivers(canonicalValueSymbol(symbol)).size(),
@@ -40,8 +46,10 @@ class ReportVariables
 
 public:
   explicit ReportVariables(ast::Compilation &compilation,
-                           analysis::AnalysisManager &analysisManager)
-      : ReportVisitorBase(compilation), analysisManager(analysisManager) {}
+                           analysis::AnalysisManager &analysisManager,
+                           std::vector<uint64_t> widths = {})
+      : ReportVisitorBase(compilation), analysisManager(analysisManager),
+        widthFilters(std::move(widths)) {}
 
   auto tableHeader() const -> netlist::Utilities::Row {
     return {"Name", "Type", "Width", "Kind", "Drivers", "Location"};

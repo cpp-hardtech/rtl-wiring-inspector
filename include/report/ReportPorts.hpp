@@ -22,6 +22,7 @@ struct PortInfo {
 /// Visitor for printing port information.
 class ReportPorts : public ReportVisitorBase<ReportPorts, PortInfo> {
   std::vector<ast::ArgumentDirection> directionFilters;
+  std::vector<uint64_t> widthFilters;
 
   auto directionMatches(ast::ArgumentDirection direction) const -> bool {
     return directionFilters.empty() ||
@@ -55,7 +56,9 @@ class ReportPorts : public ReportVisitorBase<ReportPorts, PortInfo> {
   }
 
 public:
-  using ReportVisitorBase::ReportVisitorBase;
+  explicit ReportPorts(ast::Compilation &compilation,
+                       std::vector<uint64_t> widths = {})
+      : ReportVisitorBase(compilation), widthFilters(std::move(widths)) {}
 
   /// Report ports with any of the given directions. An empty list keeps all.
   void setDirectionFilters(std::vector<ast::ArgumentDirection> filters) {
@@ -93,10 +96,14 @@ public:
     if (!directionMatches(symbol.direction) || !acceptSymbol(symbol, path)) {
       return;
     }
+    const auto width = symbol.getType().getBitWidth();
+    if (!widthMatches(width, widthFilters)) {
+      return;
+    }
     items.push_back(PortInfo{
         .name = std::move(path),
         .direction = symbol.direction,
-        .width = symbol.getType().getBitWidth(),
+        .width = width,
         .netType = portNetTypeName(symbol),
         .location = symbol.location,
     });
@@ -107,10 +114,14 @@ public:
     if (!directionMatches(symbol.direction) || !acceptSymbol(symbol, path)) {
       return;
     }
+    const auto width = reportWidth(symbol.getType());
+    if (!widthMatches(width, widthFilters)) {
+      return;
+    }
     items.push_back(PortInfo{
         .name = std::move(path),
         .direction = symbol.direction,
-        .width = reportWidth(symbol.getType()),
+        .width = width,
         .netType = portNetTypeName(symbol),
         .location = symbol.location,
     });
